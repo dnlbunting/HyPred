@@ -1,0 +1,337 @@
+#!/usr/bin/env python
+
+import pandas as pd
+import numpy as np
+import re,copy
+from collections import defaultdict
+import sklearn
+from sklearn.linear_model import LogisticRegression
+from  sklearn import cross_validation
+import matplotlib
+import matplotlib.cm as cm 
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
+
+
+lett_to_num = {'A':1,'T':2, 'G':3, "C":4}
+num_to_lett = {1:'A',2:'T', 3:'G', 4:"C", -9:"X"}
+
+markers_1 = pd.read_csv("markers_1.txt", comment='#', skip_blank_lines=True).drop("group", 1).dropna(axis=0)
+markers_4 = pd.read_csv("markers_4.txt", comment='#', skip_blank_lines=True).drop("group", 1).dropna(axis=0)
+markers_41 = pd.read_csv("markers_41.txt", comment='#', skip_blank_lines=True).drop("group", 1).dropna(axis=0)
+
+reference = pd.read_csv("reference.txt", comment='#', sep='\t', skip_blank_lines=True)
+
+ref = { x[0]:str(lett_to_num[x[1]]) for x in reference.to_dict(orient='split')['data']}
+
+
+
+
+assert np.all(markers_1['markers'] == markers_4['markers'])
+assert np.all(markers_1['markers'] == markers_41['markers'])
+
+loci = markers_1['markers']
+
+def discard_het(ref, obs):
+    
+    if obs == ref*2:
+        ## Homokaryotic match for refetrecne 
+        return -1
+        
+    elif obs == '-9-9' or obs == float('nan'):
+        ## Missing data
+        return 0
+        
+    elif ref in obs:
+        ## Heterokaryotic, one is match for reference
+        return 0
+        
+    elif obs[0] == obs[1]:
+        ## Homokaryotic, differnt from reference
+        return 1
+
+    else:
+        ## Heterokaryotic, neither match reference
+        return 0
+
+
+def half_count(ref, obs):
+    
+    if obs == ref*2:
+        ## Homokaryotic match for refetrecne 
+        return -1
+        
+    elif obs == '-9-9' or obs == float('nan'):
+        ## Missing data
+        return 0
+        
+    elif ref in obs:
+        ## Heterokaryotic, one is match for reference
+        return +0.5
+        
+    elif obs[0] == obs[1]:
+        ## Homokaryotic, differnt from reference
+        return 1
+
+    else:
+        ## Heterokaryotic, neither match reference
+        return 1
+        
+        
+def label(ref, obs):
+    
+    if obs == ref*2:
+        ## Homokaryotic match for refetrecne 
+        return 'rr'
+        
+    elif obs == '-9-9' or obs == float('nan'):
+        ## Missing data
+        return 'e'
+        
+    elif ref in obs:
+        ## Heterokaryotic, one is match for reference
+        return 'rx'
+        
+    elif obs[0] == obs[1]:
+        ## Homokaryotic, differnt from reference
+        return 'xx'
+
+    else:
+        ## Heterokaryotic, neither match reference
+        return 'xy'        
+
+def encode(marker_df, ref, enc_function):
+    """ Encodes the dataframe of bases at each locus per library under the encoding scheme given in enc_function
+    
+        Params:
+        marker_df : dataframe of SNPs for each library from Vanessa
+        ref: dictionary mapping contig_pos -> {1,2,3,4} = {A.T, G, C}
+        enc_function: function to encode the observed bases relative to the reference args = (ref='2', obs='21')
+    
+        Returns:
+        encoded: np array with shape = (n_loci, n_libraries)
+    """
+    
+    
+    encoded = np.empty((marker_df.shape[0], marker_df.shape[1]-1), dtype=np.object)
+    
+    for i,line in enumerate(marker_df.iterrows()):
+        data = np.array(line[1][1:])
+        row = [enc_function(ref[line[1][0]], x) for x in data]
+        encoded[i] = row
+        
+    return encoded
+
+def contig_bunch(marker, loci):
+    """ Breaks up the array of (loci, libraries) into a separate contigs
+    
+        Params:
+        marker: output from encode, array (n_loci, n_libraries) 
+        loci: list of contig_pos that corresponds with axis 0 of marker 
+    
+        Returns:
+        bunched: dictionary {contig : {'pos':[positions of markers on contig], 'data':array shape (n_pos, n_libraries)}}
+    """
+    n_loci = len(loci)
+    bunched = defaultdict(lambda : {'pos':[], 'data':[]})
+    for i in range(n_loci):
+        contig,pos = loci[i].split('_')
+        bunched[contig]['pos'].append(pos)
+        bunched[contig]['data'].append(marker[i])
+    
+    for contig in bunched.values():
+        contig['data'] = np.array(contig['data'])
+        
+    return bunched
+
+def create_training_data(bunched1, bunched0):
+    """ Merges data bunched by contig of the two groups, creates X and y members.
+        NB transposes X array so it is (n_libraries, n_markers)
+        Params:
+        bunched1: dictionary {contig : {'pos':[positions of markers on contig], 'data':array shape (n_pos, n_libraries)}}
+                 y=1
+        bunched0: dictionary {contig : {'pos':[positions of markers on contig], 'data':array shape (n_pos, n_libraries)}}
+             y=0
+    Returns:
+        contig_X: {contig : {'pos':[positions of markers on contig], 'X':array shape (n_libraries1+n_libraries0, n_pos), 'y': array shape (n_libraries1+n_libraries0)}}
+    """
+    
+    contig_X = {}
+    
+    for c in bunched0.keys():
+        assert bunched1[c]['pos'] == bunched0[c]['pos']
+        contig_X[c] = {}
+        contig_X[c]['pos'] =  bunched0[c]['pos']
+        contig_X[c]['X'] = np.concatenate(( bunched1[c]['data'], bunched0[c]['data']), axis=1)
+        contig_X[c]['X'] = np.transpose(contig_X[c]['X'])
+        contig_X[c]['y'] = np.array([1]*bunched1[c]['data'].shape[1] + [0]*bunched0[c]['data'].shape[1])
+        
+    return contig_X
+
+def create_test_data(bunched):
+    
+    """docstring for create_test_data"""
+    test_data = {}
+    for c in bunched.keys():
+        test_data[c] = {}
+        test_data[c]['pos'] = bunched[c]['pos']
+        test_data[c]['X'] = np.transpose(bunched[c]['data'])
+        
+    return test_data
+        
+
+def train_predict(C, train_data, test_data, plot=False):
+    selected_contigs = train_data.keys()
+    
+    classifier = lambda : LogisticRegression(class_weight='balanced', penalty='l1',C=C, fit_intercept=False)
+    print "\n" + '-'*60 + "\n C = "+str(C)+"\n"+'-'*60
+    
+    cv_accuracy = []
+    cv_selected_contigs = []
+    for contig in train_data.keys():    
+        train_data[contig]['cv'] = cross_validation.cross_val_score(classifier(), X=train_data[contig]['X'], y=train_data[contig]['y'], 
+                                         cv=cross_validation.StratifiedKFold(train_data[contig]['y'], 10, shuffle=True))
+                                         
+        acc = np.mean(train_data[contig]['cv'])
+        cv_accuracy.append(acc)
+        
+        ## Require CV accuracy of >95% to use to evaluate hybridisation 
+        if acc > 0.95:
+            cv_selected_contigs.append(contig)    
+            train_data[contig]['lr'] = classifier()
+            train_data[contig]['lr'].fit(X=train_data[contig]['X'], y=train_data[contig]['y'])
+    
+        
+    print "Successfully trained %i classifiers" % len(cv_selected_contigs)
+    #
+    #
+    
+    results = []    
+    results_contigs = {}
+    for contig in cv_selected_contigs:
+        test_data[contig]['p0'] = [x[0] for x in train_data[contig]['lr'].predict_proba(test_data[contig]['X'])]
+        results_contigs[contig] = test_data[contig]
+        results.append(test_data[contig]['p0'])
+        
+    results = np.array(results)
+    
+    print ">0.9 : " + ' '.join([str(x) for x in np.sum(results > 0.9, axis=0)])
+    print "<0.1 : " + ' '.join([str(x) for x in np.sum(results < 0.1, axis=0)])
+    
+    
+    if plot==True:
+        plt.figure()
+        plt.hist(cv_accuracy, bins=50)
+        plt.figure()
+        for i in range(results.shape[1]):
+            plt.hist(results[:,i],bins=50, histtype='step')
+            plt.xlabel("Pr(Group 4)")
+            
+    return results_contigs
+
+
+
+
+
+
+    
+"""Label Group 1 = 1
+         Group 4 = 0"""
+
+################## half_count ######################################################
+marker_1_enc = encode(markers_1, ref, half_count)
+marker_4_enc = encode(markers_4, ref, half_count)            
+hybrid_enc = encode(markers_41, ref, half_count)            
+            
+marker_1_bunched = contig_bunch(marker_1_enc, loci)
+marker_4_bunched = contig_bunch(marker_4_enc, loci)
+hybrid_bunched = contig_bunch(hybrid_enc, loci)
+
+training_data = create_training_data(marker_1_bunched, marker_4_bunched)
+hc_test_data = create_test_data(hybrid_bunched)
+
+ 
+## Now select contigs that look reasonable,
+## Filter for contig
+
+snps_per_contig = [contig['X'].shape[1] for contig in training_data.values()]
+score_per_contig = [np.sum(np.abs(contig['X'])) for contig in training_data.values()]
+
+
+plt.hist(score_per_contig, bins=25)
+plt.savefig("score_per_contig.pdf")
+plt.close()
+
+plt.hist(snps_per_contig, bins=25)
+plt.savefig("snps_per_contig.pdf")
+plt.close()
+
+
+hc_filtered = {k:v for k,v in training_data.items() if np.sum(np.abs(v['X'])) > 1000}
+
+########################################################################
+
+
+################## discard het ######################################################v
+
+marker_1_enc = encode(markers_1, ref, discard_het)
+marker_4_enc = encode(markers_4, ref, discard_het)            
+hybrid_enc = encode(markers_41, ref, discard_het)            
+            
+marker_1_bunched = contig_bunch(marker_1_enc, loci)
+marker_4_bunched = contig_bunch(marker_4_enc, loci)
+hybrid_bunched = contig_bunch(hybrid_enc, loci)
+
+training_data = create_training_data(marker_1_bunched, marker_4_bunched)
+dh_test_data = create_test_data(hybrid_bunched)
+
+ 
+## Now select contigs that look reasonable,
+## Filter for contig
+
+snps_per_contig = [contig['X'].shape[1] for contig in training_data.values()]
+score_per_contig = [np.sum(np.abs(contig['X'])) for contig in training_data.values()]
+
+
+plt.hist(score_per_contig, bins=25)
+plt.savefig("score_per_contig.pdf")
+plt.close()
+
+plt.hist(snps_per_contig, bins=25)
+plt.savefig("snps_per_contig.pdf")
+plt.close()
+
+
+dh_filtered = {k:v for k,v in training_data.items() if np.sum(np.abs(v['X'])) > 1000}
+
+##########################################################################################
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+def plot(pssm):
+    '''
+    Plots the S matrix
+    '''     
+    plt.matshow(pssm, cmap = cm.seismic, vmax=abs(pssm).max(), vmin=-abs(pssm).max())
+    plt.colorbar()
+    plt.show()
+
+## Sanity check that the same postions are being tested on the same cintigs in both groups
+
+for locus in loci:
+    contig, pos = locus.split('_')
+    print marker_4_bunched[contig]['pos'] == marker_1_bunched[contig]['pos']
