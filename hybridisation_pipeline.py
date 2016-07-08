@@ -24,81 +24,10 @@ reference = pd.read_csv("reference.txt", comment='#', sep='\t', skip_blank_lines
 
 ref = { x[0]:str(lett_to_num[x[1]]) for x in reference.to_dict(orient='split')['data']}
 
-
-
-
 assert np.all(markers_1['markers'] == markers_4['markers'])
 assert np.all(markers_1['markers'] == markers_41['markers'])
 
 loci = markers_1['markers']
-
-def discard_het(ref, obs):
-    
-    if obs == ref*2:
-        ## Homokaryotic match for refetrecne 
-        return -1
-        
-    elif obs == '-9-9' or obs == float('nan'):
-        ## Missing data
-        return 0
-        
-    elif ref in obs:
-        ## Heterokaryotic, one is match for reference
-        return 0
-        
-    elif obs[0] == obs[1]:
-        ## Homokaryotic, differnt from reference
-        return 1
-
-    else:
-        ## Heterokaryotic, neither match reference
-        return 0
-
-
-def half_count(ref, obs):
-    
-    if obs == ref*2:
-        ## Homokaryotic match for refetrecne 
-        return -1
-        
-    elif obs == '-9-9' or obs == float('nan'):
-        ## Missing data
-        return 0
-        
-    elif ref in obs:
-        ## Heterokaryotic, one is match for reference
-        return +0.5
-        
-    elif obs[0] == obs[1]:
-        ## Homokaryotic, differnt from reference
-        return 1
-
-    else:
-        ## Heterokaryotic, neither match reference
-        return 1
-        
-        
-def label(ref, obs):
-    
-    if obs == ref*2:
-        ## Homokaryotic match for refetrecne 
-        return 'rr'
-        
-    elif obs == '-9-9' or obs == float('nan'):
-        ## Missing data
-        return 'e'
-        
-    elif ref in obs:
-        ## Heterokaryotic, one is match for reference
-        return 'rx'
-        
-    elif obs[0] == obs[1]:
-        ## Homokaryotic, differnt from reference
-        return 'xx'
-
-    else:
-        ## Heterokaryotic, neither match reference
-        return 'xy'        
 
 def encode(marker_df, ref, enc_function):
     """ Encodes the dataframe of bases at each locus per library under the encoding scheme given in enc_function
@@ -178,7 +107,6 @@ def create_test_data(bunched):
         test_data[c]['X'] = np.transpose(bunched[c]['data'])
         
     return test_data
-        
 
 def train_predict(C, train_data, test_data, plot=False):
     selected_contigs = train_data.keys()
@@ -212,7 +140,8 @@ def train_predict(C, train_data, test_data, plot=False):
         test_data[contig]['p0'] = [x[0] for x in train_data[contig]['lr'].predict_proba(test_data[contig]['X'])]
         results_contigs[contig] = test_data[contig]
         results.append(test_data[contig]['p0'])
-        
+        results_contigs[contig]['lr'] = train_data[contig]['lr']
+    
     results = np.array(results)
     
     print ">0.9 : " + ' '.join([str(x) for x in np.sum(results > 0.9, axis=0)])
@@ -229,109 +158,24 @@ def train_predict(C, train_data, test_data, plot=False):
             
     return results_contigs
 
-
-
-
-
-
-    
-"""Label Group 1 = 1
-         Group 4 = 0"""
-
-################## half_count ######################################################
-marker_1_enc = encode(markers_1, ref, half_count)
-marker_4_enc = encode(markers_4, ref, half_count)            
-hybrid_enc = encode(markers_41, ref, half_count)            
-            
-marker_1_bunched = contig_bunch(marker_1_enc, loci)
-marker_4_bunched = contig_bunch(marker_4_enc, loci)
-hybrid_bunched = contig_bunch(hybrid_enc, loci)
-
-training_data = create_training_data(marker_1_bunched, marker_4_bunched)
-hc_test_data = create_test_data(hybrid_bunched)
-
- 
-## Now select contigs that look reasonable,
-## Filter for contig
-
-snps_per_contig = [contig['X'].shape[1] for contig in training_data.values()]
-score_per_contig = [np.sum(np.abs(contig['X'])) for contig in training_data.values()]
-
-
-plt.hist(score_per_contig, bins=25)
-plt.savefig("score_per_contig.pdf")
-plt.close()
-
-plt.hist(snps_per_contig, bins=25)
-plt.savefig("snps_per_contig.pdf")
-plt.close()
-
-
-hc_filtered = {k:v for k,v in training_data.items() if np.sum(np.abs(v['X'])) > 1000}
-
-########################################################################
-
-
-################## discard het ######################################################v
-
-marker_1_enc = encode(markers_1, ref, discard_het)
-marker_4_enc = encode(markers_4, ref, discard_het)            
-hybrid_enc = encode(markers_41, ref, discard_het)            
-            
-marker_1_bunched = contig_bunch(marker_1_enc, loci)
-marker_4_bunched = contig_bunch(marker_4_enc, loci)
-hybrid_bunched = contig_bunch(hybrid_enc, loci)
-
-training_data = create_training_data(marker_1_bunched, marker_4_bunched)
-dh_test_data = create_test_data(hybrid_bunched)
-
- 
-## Now select contigs that look reasonable,
-## Filter for contig
-
-snps_per_contig = [contig['X'].shape[1] for contig in training_data.values()]
-score_per_contig = [np.sum(np.abs(contig['X'])) for contig in training_data.values()]
-
-
-plt.hist(score_per_contig, bins=25)
-plt.savefig("score_per_contig.pdf")
-plt.close()
-
-plt.hist(snps_per_contig, bins=25)
-plt.savefig("snps_per_contig.pdf")
-plt.close()
-
-
-dh_filtered = {k:v for k,v in training_data.items() if np.sum(np.abs(v['X'])) > 1000}
-
-##########################################################################################
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-def plot(pssm):
+def plot(pssm, cb=True):
     '''
     Plots the S matrix
     '''     
+    pssm = np.array(pssm, dtype=np.float)
     plt.matshow(pssm, cmap = cm.seismic, vmax=abs(pssm).max(), vmin=-abs(pssm).max())
-    plt.colorbar()
+    if cb:
+        plt.colorbar()
     plt.show()
 
-## Sanity check that the same postions are being tested on the same cintigs in both groups
 
-for locus in loci:
-    contig, pos = locus.split('_')
-    print marker_4_bunched[contig]['pos'] == marker_1_bunched[contig]['pos']
+def examine_contig(contig, train, result):
+    plot(result[contig]['X'], cb=False)
+    plt.title("Group 41")
+    
+    plot(train[contig]['X'], cb=False)
+    plt.title("Group 1 and Group 4")
+    
+    plot(result[contig]['lr'].coef_, cb=False)
+    plt.title("Classifier weights")
+    
