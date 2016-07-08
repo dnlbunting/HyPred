@@ -16,18 +16,23 @@ import matplotlib.pyplot as plt
 lett_to_num = {'A':1,'T':2, 'G':3, "C":4}
 num_to_lett = {1:'A',2:'T', 3:'G', 4:"C", -9:"X"}
 
-markers_1 = pd.read_csv("markers_1.txt", comment='#', skip_blank_lines=True).drop("group", 1).dropna(axis=0)
-markers_4 = pd.read_csv("markers_4.txt", comment='#', skip_blank_lines=True).drop("group", 1).dropna(axis=0)
-markers_41 = pd.read_csv("markers_41.txt", comment='#', skip_blank_lines=True).drop("group", 1).dropna(axis=0)
+def load_data(markersA_file, markersB_file, markersAB_file, ref_file):
+    
+    markersA = pd.read_csv(markersA_file, comment='#', skip_blank_lines=True).drop("group", 1).dropna(axis=0)
+    markersB = pd.read_csv(markersB_file, comment='#', skip_blank_lines=True).drop("group", 1).dropna(axis=0)
+    markersAB = pd.read_csv(markersAB_file, comment='#', skip_blank_lines=True).drop("group", 1).dropna(axis=0)
+    
+    reference = pd.read_csv(ref_file, comment='#', sep='\t', skip_blank_lines=True)
+    ref = { x[0]:str(lett_to_num[x[1]]) for x in reference.to_dict(orient='split')['data']}
+    
+    assert np.all(markersA['markers'] == markersB['markers'])
+    assert np.all(markersA['markers'] == markersAB['markers'])
+    
+    loci = markersA['markers']
+    
+    return markersA, markersB, markersAB, ref, loci
 
-reference = pd.read_csv("reference.txt", comment='#', sep='\t', skip_blank_lines=True)
 
-ref = { x[0]:str(lett_to_num[x[1]]) for x in reference.to_dict(orient='split')['data']}
-
-assert np.all(markers_1['markers'] == markers_4['markers'])
-assert np.all(markers_1['markers'] == markers_41['markers'])
-
-loci = markers_1['markers']
 
 def encode(marker_df, ref, enc_function):
     """ Encodes the dataframe of bases at each locus per library under the encoding scheme given in enc_function
