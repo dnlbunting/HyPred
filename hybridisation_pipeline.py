@@ -51,7 +51,7 @@ def encode(marker_df, ref, enc_function):
     
     for i,line in enumerate(marker_df.iterrows()):
         data = np.array(line[1][1:])
-        row = [enc_function(ref[line[1][0]], x) for x in data]
+        row = [enc_function(ref[line[1][0]], str(x)) for x in data]
         encoded[i] = row
         
     return encoded
@@ -114,10 +114,10 @@ def create_test_data(bunched):
     return test_data
 
 def train_predict(C, train_data, test_data, plot=False):
-    selected_contigs = train_data.keys()
+    selected_contigs = list(train_data.keys())
     
     classifier = lambda : LogisticRegression(class_weight='balanced', penalty='l1',C=C, fit_intercept=False)
-    print "\n" + '-'*60 + "\n C = "+str(C)+"\n"+'-'*60
+    print("\n" + '-'*60 + "\n C = "+str(C)+"\n"+'-'*60)
     
     cv_accuracy = []
     cv_selected_contigs = []
@@ -135,9 +135,8 @@ def train_predict(C, train_data, test_data, plot=False):
             train_data[contig]['lr'].fit(X=train_data[contig]['X'], y=train_data[contig]['y'])
     
         
-    print "Successfully trained %i classifiers" % len(cv_selected_contigs)
-    #
-    #
+    print("Successfully trained %i classifiers" % len(cv_selected_contigs))#
+    
     
     results = []    
     results_contigs = {}
@@ -149,8 +148,8 @@ def train_predict(C, train_data, test_data, plot=False):
     
     results = np.array(results)
     
-    print ">0.9 : " + ' '.join([str(x) for x in np.sum(results > 0.9, axis=0)])
-    print "<0.1 : " + ' '.join([str(x) for x in np.sum(results < 0.1, axis=0)])
+    print(">0.9 : " + ' '.join([str(x) for x in np.sum(results > 0.9, axis=0)]))
+    print("<0.1 : " + ' '.join([str(x) for x in np.sum(results < 0.1, axis=0)]))
     
     
     if plot==True:
