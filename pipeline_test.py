@@ -1,7 +1,6 @@
 #!/usr/bin/env python
-from hybridisation_pipeline import (markers_1, markers_4, markers_41, ref, loci, # Data
-                                    encode, contig_bunch, create_training_data, # Methods
-                                    create_test_data, train_predict, plot, examine_contig) 
+from hybridisation_pipeline import (encode, contig_bunch, create_training_data, # Methods
+                                    create_test_data, train_predict, plot, examine_contig, load_data) 
                                     
                                     
 from snp_encodings import discard_het, half_count, label 
@@ -11,6 +10,7 @@ import matplotlib.pyplot as plt
 """Label Group 1 = 1
          Group 4 = 0"""
 
+markersA, markersB, markersAB, ref, loci = load_data("markers_1.txt", "markers_4.txt", "markers_41.txt", "reference.txt")
 
 ################## half_count ######################################################
 marker_1_enc = encode(markers_1, ref, half_count)
