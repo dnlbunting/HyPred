@@ -3,3 +3,5 @@ _pycache_
 *.pdf
 .DS_Store
 *.fasta
+*.csv
+*.recombmap
