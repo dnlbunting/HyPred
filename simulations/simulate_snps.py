@@ -32,8 +32,6 @@ def diverge(reference, mutation_mean, mutation_sd, n_children):
         
         for j in range(n_mut[i]):
             children[i][position[j]] = mut(children[i][position[j]], mutation[j])
-            
-            
     return children    
 def recombineIndiv(indA, indB, ratio, markers_per_contig):
     
@@ -83,6 +81,7 @@ def simulate_missing_data(pop, rate_mean, rate_sd):
              
     return pop
 
+    
 
 
 ## From the dataset:
@@ -90,40 +89,50 @@ def simulate_missing_data(pop, rate_mean, rate_sd):
 ## mean_markers_per_contig = 7.5
 ## mean 
 
-loci, base, markers_per_contig = create_referece(5000,7.5)
-a, b = diverge(base, 18000, 2500, 2)
-
-## Simulate lineage specific deletions 
-a, = simulate_missing_data([a], 0.2,0.05)
-b, = simulate_missing_data([b], 0.2,0.05)
-
-
-popA = diverge(a, 1000, 250, 34)
-popB = diverge(b, 1000, 250, 100)
-
-popC, recombination_map = recombine(popA, popB, 0.1, markers_per_contig, 7)
-
-writeRecombMap(recombination_map, 'popAB')
-
-
-
-loci, base, markers_per_contig = create_referece(5000,7.5)
-a, b = diverge(base, 18000, 2500, 2)
-b,c = diverge(b, 10000,2500, 2)
-
-popA = diverge(a, 1000, 250, 34)
-popB = diverge(b, 1000, 250, 100)
-popC = diverge(c, 1000, 250, 10)
-
-
-popA = simulate_missing_data(popA, 0.25,0.05)
-popB = simulate_missing_data(popB, 0.25,0.05)
-popC = simulate_missing_data(popC, 0.25,0.05)
+def simulate_hybrid():
+    
+    loci, base, markers_per_contig = create_referece(5000,7.5)
+    a, b = diverge(base, 18000, 2500, 2)
+    
+    ## Simulate lineage specific deletions 
+    a, = simulate_missing_data([a], 0.1,0.05)
+    b, = simulate_missing_data([b], 0.1,0.05)
+    
+    
+    popA = diverge(a, 1000, 250, 25)
+    popB = diverge(b, 1000, 250, 25)
+    
+    popC, recombination_map = recombine(popA, popB, 0.1, markers_per_contig, 7)
+    popC = diverge(c, 1000, 250, 10)
+    
+    popA = simulate_missing_data(popA, 0.5,0.05)
+    popB = simulate_missing_data(popB, 0.5,0.05)
+    popC = simulate_missing_data(popC, 0.5,0.05)
+    
+    writeRecombMap(recombination_map, 'popAB')
+    writeMarkers(popA, loci, "popA")
+    writeMarkers(popB, loci, "popB")
+    writeMarkers(popC, loci, "popAB")
+    writeReference(loci, base, "reference.txt")
 
 
-writeMarkers(popA, loci, "popA")
-writeMarkers(popB, loci, "popB")
-writeMarkers(popC, loci, "popAB")
-writeReference(loci, base, "reference.txt")
+def simulate_no_hybrid():
+    loci, base, markers_per_contig = create_referece(5000,7.5)
+    a, b = diverge(base, 18000, 2500, 2)
+    b,c = diverge(b, 10000,2500, 2)
+    
+    popA = diverge(a, 1000, 250, 34)
+    popB = diverge(b, 1000, 250, 100)
+    popC = diverge(c, 1000, 250, 10)
+    
+    popA = simulate_missing_data(popA, 0.5,0.05)
+    popB = simulate_missing_data(popB, 0.5,0.05)
+    popC = simulate_missing_data(popC, 0.5,0.05)
+    
+    
+    writeMarkers(popA, loci, "popA")
+    writeMarkers(popB, loci, "popB")
+    writeMarkers(popC, loci, "popAB")
+    writeReference(loci, base, "reference.txt")
 
 
