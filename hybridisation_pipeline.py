@@ -16,26 +16,33 @@ import matplotlib.pyplot as plt
 lett_to_num = {'A':1,'T':2, 'G':3, "C":4}
 num_to_lett = {1:'A',2:'T', 3:'G', 4:"C", -9:"X"}
 
-## Data containers
-class TrainData(object):
-    """Class for storing per contig train data"""
-    def __init__(self, X, y, pos, contig, sample_names=None):
+class Data(object):
+    """docstring for Data"""
+    def __init__(self, X, pos, contig, sample_names=None):
+        super(Data, self).__init__()
         self.X = X
-        self.y = y
         self.pos = pos
         self.contig = contig
         self.sample_names = sample_names
         
+        assert len(sample_names) == X.shape[0], "Dimensions of sample_names must match X"
+        self.n_samples, self.n_loci = X.shape
+        
+## Data containers
+class TrainData(object):
+    """Class for storing per contig train data"""
+    def __init__(self, X, y, pos, contig, sample_names=None):
+        super(TrainData, self).__init__(X, pos, contig, sample_names)
+        self.y = y
+
+        
 class TestData(object):
     """Class for storing per contig test data"""
     def __init__(self, X, pos, contig, truth=None, sample_names=None):
-        self.X = X
-        self.pos = pos
-        self.contig = contig    
+        super(TestData, self).__init__(X, pos, contig, sample_names)
         self.truth = truth
-        self.sample_names = sample_names
         
-class ResultData(object):
+class Result(object):
     """Class for storing the per contig results, weak ref'ed to the input data"""
     def __init__(self, contig, train=None, test=None, cv=None, classifier=None, p0=None):
         
@@ -263,7 +270,7 @@ class HyPred(object):
             ## Require self.CV accuracy of >self.acc_cutoff to use to evaluate hybridisation 
             if np.mean(cv) > self.acc_cutoff:
                 self.selected_contigs.append(contig)
-                self.results_data[contig] = ResultData(train=self.train_data[contig],
+                self.results_data[contig] = Result(train=self.train_data[contig],
                                                   cv=cv,
                                                   contig=contig,   
                                                   classifier = self.classifier())
@@ -278,7 +285,7 @@ class HyPred(object):
          classifiers in results data, for the contigs in selected_contigs
         
         Params:
-        results_data: dictionary {contig : ResultData} where the ResultData object has a classifier member populated by a trained classifier """
+        results_data: dictionary {contig : Result} where the Result object has a classifier member populated by a trained classifier """
         
         self.pred_matrix = []
         self.p0_matrix = []
