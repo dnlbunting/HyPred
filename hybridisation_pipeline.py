@@ -68,7 +68,7 @@ class ResultData(object):
 
 
 ## Preprocessing
-def load_data(markersA_file, markersB_file, markersAB_file, ref_file):
+def load_data(markersA_file, markersB_file, markersAB_file, ref_file, contig_data_file=None):
     """ Loads SNP data for the two training groups (A, B) and the test group (AB),
         loads the reference base and constructs a lookup dictionary.
     
@@ -94,8 +94,12 @@ def load_data(markersA_file, markersB_file, markersAB_file, ref_file):
     
     loci = markersA['markers']
     
-    return markersA, markersB, markersAB, ref, loci
-
+    if contig_data_file is not None:
+        contig_data = pd.read_csv(contig_data_file, comment='#', skip_blank_lines=True, index_col=0)
+        return markersA, markersB, markersAB, ref, loci, contig_data
+    
+    else:
+        return markersA, markersB, markersAB, ref, loci
 
 
 def encode(marker_df, ref, enc_function):
@@ -164,7 +168,7 @@ def merge_bunched(bunched1, bunched0):
                                   contig = c)
     return train_data
 
-def create_training_data(markersA, markersB, encode_func, loci, ref):
+def create_training_data(markersA, markersB, encode_func, loci, ref, contig_data=None):
     """Basically a wrapper that combines the data preprocessing stages for the pipeline for the ancestral populations
         markersA = 1
         markersB = 0
@@ -179,12 +183,14 @@ def create_training_data(markersA, markersB, encode_func, loci, ref):
     """
     data = merge_bunched(contig_bunch(encode(markersA, ref, encode_func), loci), 
                          contig_bunch(encode(markersB, ref, encode_func), loci))
-    for val in data.values():
+    
+    for key,val in data.items():
         val.sample_names = list(markersA.columns[1:]) + list(markersB.columns[1:])
-                                    
+        if contig_data is not None:
+             val.contig_data = contig_data.ix[int(key)].to_dict()
+             
     return data
-                                      
-                                      
+    
 def create_test_data(markersAB, encode_func, loci, ref):
     """Basically a wrapper that combines the data preprocessing stages for the pipeline for the descendent population
     
@@ -304,7 +310,7 @@ class HyPred(object):
         A = np.sum(self.pred_matrix == "popA", axis=0)
         B = np.sum(self.pred_matrix == "popB", axis=0)
         X = np.sum(self.pred_matrix == "X", axis=0)
-        ratio = A/B
+        ratio = np.array(A, dtype=np.float)/B
         
         print("Sample  \tpopA\tpopB\tno pred\tratio")
         print("-"*60)
