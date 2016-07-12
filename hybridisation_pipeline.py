@@ -38,10 +38,37 @@ class TrainData(object):
         
 class TestData(object):
     """Class for storing per contig test data"""
-    def __init__(self, X, pos, contig, truth=None, sample_names=None):
+    def __init__(self, X, pos, contig, truth=None, sample_names=None, het_X=None):
         super(TestData, self).__init__(X, pos, contig, sample_names)
+        self.het_X = het_X
         self.truth = truth
         
+        if self.het_X is not None:
+            self.growHetTree()
+            
+    def growHetTree(self):
+        """Unpacks the compressed representation of heterokaryotic data to a full tree of possible configurations"""
+        
+        self.het_tree = [None for i in range(len(self.sample_names))]
+        for sample_i in range(self.het_X.shape[0]):
+            het_sites = np.sum([len(x) == 2 for x in self.het_X[sample_i]])
+            self.het_tree[sample_i] = np.empty((2**het_sites, self.n_loci), dtype=np.int8)
+            i = np.arange(2**het_sites)
+            
+            for locus_i in range(self.n_loci):
+                if len(self.het_X[sample_i, locus_i]) == 1:
+                    self.het_tree[sample_i][:, locus_i] = self.het_X[sample_i, locus_i][0]
+                else:
+                    het_sites -= 1
+                    ## For each site futher subdivide the block matrix
+                    self.het_tree[sample_i][:, locus_i] = np.where(np.floor(i/2**het_sites) % 2, 
+                                                                   self.het_X[sample_i, locus_i][0], 
+                                                                   self.het_X[sample_i, locus_i][1])
+                        
+        
+            
+            
+            
 class Result(object):
     """Class for storing the per contig results, weak ref'ed to the input data"""
     def __init__(self, contig, train=None, test=None, cv=None, classifier=None, p0=None):
@@ -220,7 +247,29 @@ def create_test_data(markersAB, encode_func, loci, ref):
                                 sample_names = list(markersAB.columns[1:]))
     return test_data
 
-
+def create_test_data_heterokaryotic(markersAB, hom_encode_func, het_encode_func, loci, ref):
+    """Basically a wrapper that combines the data preprocessing stages for the pipeline for the descendent population
+    
+    Params:
+    markersAB: dataframe of the snp data for the descendent population
+    encode_func: function taking (ref_base, obs) to the feature used to train the classifiers
+    loci: list of loci names as "conitg_pos"
+    ref: dictionary mapping loci to ref_base
+        
+    Returns:
+    test_data: dictionary of training data with keyed by contig: {contig : { 'X':matrix of enc snps, 'pos':[physical pos of snp on contig]}}  """
+    
+    hom_bunched = contig_bunch(encode(markersAB, ref, hom_encode_func), loci)
+    het_bunched = contig_bunch(encode(markersAB, ref, het_encode_func), loci)
+    
+    test_data = {}
+    for c in hom_bunched.keys():
+        test_data[c] = TestData(X = np.transpose(hom_bunched[c]['data']),
+                                het_X = np.transpose(het_bunched[c]['data']),
+                                pos = hom_bunched[c]['pos'],
+                                contig = c,
+                                sample_names = list(markersAB.columns[1:]))
+    return test_data
 
 
 ## Core pipeline
@@ -280,7 +329,7 @@ class HyPred(object):
         
         return len(self.selected_contigs)
         
-    def predict(self):
+    def predict(self, use_het=True):
         """Predict ancestral population of origin, using test_data and the trained
          classifiers in results data, for the contigs in selected_contigs
         
@@ -291,14 +340,26 @@ class HyPred(object):
         self.p0_matrix = []
         for contig in self.selected_contigs:
             self.results_data[contig].test = self.test_data[contig]
-            self.results_data[contig].p0 = np.array([x[0] for x in self.results_data[contig].classifier.predict_proba(self.test_data[contig].X)])
             
+            self.results_data[contig].p0 = np.array([x[0] for x in 
+                                        self.results_data[contig].classifier.predict_proba(self.test_data[contig].X)])
+            if use_het is True:
+                self.results_data[contig].het_tree_scores = np.array([self.results_data[contig].classifier.decision_function(x) 
+                                                                      for x in self.test_data[contig].het_tree])
+                                                                      
+                                                                      
             self.pred_matrix.append(self.results_data[contig].pred)
             self.p0_matrix.append(self.results_data[contig].p0)
             
         self.pred_matrix = np.array(self.pred_matrix)
         self.p0_matrix = np.array(self.p0_matrix)
         
+    def inferKaryotype(self):
+        """docstring for inferKaryotype"""
+        for contig in self.results_data.keys():
+            self.results_data[contig].karyotype = [None for n in range(self.results_data[contig])]
+            for sample in self.results_data[contig].het_trees_scores:
+                
         
     def plot(self):
         """Plot the distribution of ancestral probabilities"""

@@ -1,6 +1,27 @@
 #!/usr/bin/env python
 
+def encode_het(ref, obs):
+    
+    if obs == ref*2:
+        ## Homokaryotic match for refetrecne 
+        return [-1]
+        
+    elif obs == '-9-9' or obs == float('nan'):
+        ## Missing data
+        return [0]
+        
+    elif ref in obs:
+        ## Heterokaryotic, one is match for reference
+        return [-1,+1]
+        
+    elif obs[0] == obs[1]:
+        ## Homokaryotic, differnt from reference
+        return [+1]
 
+    else:
+        ## Heterokaryotic, neither match reference
+        return [+1]
+    
 def discard_het(ref, obs):
     
     if obs == ref*2:
