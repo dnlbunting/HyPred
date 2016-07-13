@@ -24,19 +24,21 @@ class Data(object):
         self.pos = pos
         self.contig = contig
         self.sample_names = sample_names
-        
-        assert len(sample_names) == X.shape[0], "Dimensions of sample_names must match X"
         self.n_samples, self.n_loci = X.shape
         
+        if self.sample_names is not None:
+            assert len(sample_names) == X.shape[0], "Dimensions of sample_names must match X"
+        
+        
 ## Data containers
-class TrainData(object):
+class TrainData(Data):
     """Class for storing per contig train data"""
     def __init__(self, X, y, pos, contig, sample_names=None):
         super(TrainData, self).__init__(X, pos, contig, sample_names)
         self.y = y
 
         
-class TestData(object):
+class TestData(Data):
     """Class for storing per contig test data"""
     def __init__(self, X, pos, contig, truth=None, sample_names=None):
         super(TestData, self).__init__(X, pos, contig, sample_names)
