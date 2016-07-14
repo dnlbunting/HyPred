@@ -29,13 +29,13 @@ class Data(object):
         if sample_names is not None:
             assert len(sample_names) == X.shape[0], "Dimensions of sample_names must match X"
 
+
 ## Data containers
 class TrainData(Data):
     """Class for storing per contig train data"""
     def __init__(self, X, y, pos, contig, sample_names=None):
         super(TrainData, self).__init__(X, pos, contig, sample_names)
         self.y = y
-
 
 class TestData(Data):
     """Class for storing per contig test data"""
@@ -94,8 +94,7 @@ class Result(object):
             return self.__pred
                 
 
-        
-        
+
 
 
 
@@ -132,7 +131,6 @@ def load_data(markersA_file, markersB_file, markersAB_file, ref_file, contig_dat
     
     else:
         return markersA, markersB, markersAB, ref, loci
-
 
 def encode(marker_df, ref, enc_function):
     """ Encodes the dataframe of bases at each locus per library under the encoding scheme given in enc_function
@@ -222,7 +220,7 @@ def create_training_data(markersA, markersB, encode_func, loci, ref, contig_data
              val.contig_data = contig_data.ix[int(key)].to_dict()
              
     return data
-    
+
 def create_test_data(markersAB, encode_func, loci, ref):
     """Basically a wrapper that combines the data preprocessing stages for the pipeline for the descendent population
     
@@ -368,6 +366,7 @@ class HyPred(object):
                     print karyotype_scores
                     self.results_data[contig].mean_karyotype[sample_i] = np.sum(karyotype_scores*karyotypes,axis=1)/np.sum(karyotype_scores)
 
+
     def plot(self):
         """Plot the distribution of ancestral probabilities"""
         sample_names = next(iter(self.test_data.values())).sample_names
@@ -392,19 +391,9 @@ class HyPred(object):
         for i in range(len(sample_names)):
             print("{0}\t{1}\t{2}\t{3}\t{4:.2f}".format(sample_names[i], A[i], B[i], X[i], ratio[i]))
     
-
     def examine_contig(self, contig=None):
         if contig is None:
             contig = next(iter(self.results_data.keys()))
-            
-        print("Contig {0}\n".format(contig))
-        
-        print("Sample  \tPrediction\t Pr(B)")
-        print("-"*40)
-        for s,p, p0 in zip(self.test_data[contig].sample_names, self.results_data[contig].pred, self.results_data[contig].p0  ):
-            print("{0}\t{1}\t{2:.2f}".format(s,p,p0))
-            
-        print("\nCV Accuracy: {0:.2f}".format(np.mean(self.results_data[contig].cv)))
         
         plt.matshow(np.array(self.train_data[contig].X, dtype=np.float), vmax=1, vmin=-1, cmap=cm.seismic)
         plt.yticks(range(len(self.train_data[contig].sample_names)), self.train_data[contig].sample_names, size=4)
@@ -414,8 +403,17 @@ class HyPred(object):
         plt.matshow(np.array(self.test_data[contig].X, dtype=np.float), vmax=1, vmin=-1, cmap=cm.seismic)
         plt.yticks(range(len(self.test_data[contig].sample_names)), self.test_data[contig].sample_names, size=4)
         plt.xticks(range(len(self.test_data[contig].pos)), self.test_data[contig].pos, rotation=90, size=4)
-        plt.title("Test data")
+        plt.title("Test data")    
         
+        print("Contig {0}\n".format(contig))
+        
+        print("\nCV Accuracy: {0:.2f}".format(np.mean(self.results_data[contig].cv)))
+        
+        print("Sample  \tPrediction\t Pr(B)")
+        print("-"*40)
+        for s,p, p0 in zip(self.test_data[contig].sample_names, self.results_data[contig].pred, self.results_data[contig].p0  ):
+            print("{0}\t{1}\t{2:.2f}".format(s,p,p0))
+            
         plt.matshow(np.array(self.results_data[contig].classifier.coef_, dtype=np.float), 
                             vmax=abs(self.results_data[contig].classifier.coef_).max(), 
                             vmin=-abs(self.results_data[contig].classifier.coef_).max(), 
