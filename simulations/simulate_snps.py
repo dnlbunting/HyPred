@@ -37,7 +37,7 @@ class Individual(object):
         if self.ploidy == 'N+N' or self.ploidy == '2N':
             if self.genomeB is None:
                 self.genomeB = copy.deepcopy(self.genomeA)
-                
+        
     def __deepcopy__(self, memo):
         cls = self.__class__
         result = cls.__new__(cls)
@@ -54,7 +54,6 @@ class Individual(object):
         
         return result
         
-                
     def mutate(self, mutation_mean, mutation_sd):
         """docstring for _mutateIndiv"""
         if self.ploidy == 'N':
@@ -119,7 +118,6 @@ class Population(object):
         het = [np.sum(x.genomeA != x.genomeB)/float(len(x.genomeA)) for x in self.individuals]
         print("Heterokaryotic ratio {0}".format("\t".join(["{0:.3f}".format(x) for x in  het])))
         print("Mean heterokaryotic ratio {0}".format(np.mean(het)))
-        
         print("-"*60)
             
 
@@ -218,22 +216,18 @@ class Simulation(object):
             individualsA = self.rng.choice(self.populations[popA].individuals, size=n_parentsA, replace=False)
             individualsB = self.rng.choice(self.populations[popB].individuals, size=n_parentsB, replace=False)
             
-            ## Flat array of their haploid genomes 
-            genomesA = np.array([[x.genomeA, x.genomeB] for x in individualsA]).flatten()
-            genomesB = np.array([[x.genomeA, x.genomeB] for x in individualsB]).flatten()
+            ## For each child randomly select its parents from the hybridizing pool 
+            parentsA = self.rng.choice(individualsA, size=n_children)
+            parentsB = self.rng.choice(individualsB, size=n_children)
             
-            ## Select the haploid genomes to hybridise
-            parentsA = self.rng.choice(genomesA, size=(n_children, 2))
-            parentsB = self.rng.choice(genomesB, size=(n_children, 2))
-            
+            ## For each individual pick which genome is going to hybridize
+            genomesA = [indv.genomeA if self.rng.rand() > 0.5 else indv.genomeB for indv in parentsA]
+            genomesB = [indv.genomeA if self.rng.rand() > 0.5 else indv.genomeB for indv in parentsB]
+
             for i in range(n_children):
-                gens = list(self.recombineHaploid(parentsA[i][0], parentsB[i][0], ratio=ratio)) \
-                     + list(self.recombineHaploid(parentsA[i][1], parentsB[i][1], ratio=ratio))
-                
-                A, B = self.rng.choice(range(4), size=2, replace=False)
-                
-                self.populations[popAB].individuals.append(Individual(genomeA=np.copy(gens[A]),
-                                                                      genomeB=np.copy(gens[B]), 
+                genA, genB = self.recombineHaploid(genomesA[i], genomesB[i], ratio=ratio) 
+                self.populations[popAB].individuals.append(Individual(genomeA=np.copy(genA),
+                                                                      genomeB=np.copy(genB), 
                                                                       reference=self.reference,
                                                                       ploidy=self.ploidy,
                                                                       rng=self.rng))
