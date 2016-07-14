@@ -2,7 +2,7 @@
 
 import pandas as pd
 import numpy as np
-import re,copy
+import re,copy,time
 from collections import defaultdict
 import sklearn
 from sklearn.linear_model import LogisticRegression
@@ -24,19 +24,20 @@ class Data(object):
         self.pos = pos
         self.contig = contig
         self.sample_names = sample_names
-        
-        assert len(sample_names) == X.shape[0], "Dimensions of sample_names must match X"
         self.n_samples, self.n_loci = X.shape
         
+        if sample_names is not None:
+            assert len(sample_names) == X.shape[0], "Dimensions of sample_names must match X"
+
 ## Data containers
-class TrainData(object):
+class TrainData(Data):
     """Class for storing per contig train data"""
     def __init__(self, X, y, pos, contig, sample_names=None):
         super(TrainData, self).__init__(X, pos, contig, sample_names)
         self.y = y
 
-        
-class TestData(object):
+
+class TestData(Data):
     """Class for storing per contig test data"""
     def __init__(self, X, pos, contig, truth=None, sample_names=None, het_X=None):
         super(TestData, self).__init__(X, pos, contig, sample_names)
@@ -65,10 +66,7 @@ class TestData(object):
                                                                    self.het_X[sample_i, locus_i][0], 
                                                                    self.het_X[sample_i, locus_i][1])
                         
-        
-            
-            
-            
+
 class Result(object):
     """Class for storing the per contig results, weak ref'ed to the input data"""
     def __init__(self, contig, train=None, test=None, cv=None, classifier=None, p0=None):
@@ -341,8 +339,7 @@ class HyPred(object):
         for contig in self.selected_contigs:
             self.results_data[contig].test = self.test_data[contig]
             
-            self.results_data[contig].p0 = np.array([x[0] for x in 
-                                        self.results_data[contig].classifier.predict_proba(self.test_data[contig].X)])
+            self.results_data[contig].p0 = np.array(self.results_data[contig].classifier.predict_proba(self.test_data[contig].X))[:,0]
             if use_het is True:
                 self.results_data[contig].het_tree_scores = np.array([self.results_data[contig].classifier.decision_function(x) 
                                                                       for x in self.test_data[contig].het_tree])
@@ -357,10 +354,20 @@ class HyPred(object):
     def inferKaryotype(self):
         """docstring for inferKaryotype"""
         for contig in self.results_data.keys():
-            self.results_data[contig].karyotype = [None for n in range(self.results_data[contig])]
-            for sample in self.results_data[contig].het_trees_scores:
-                
-        
+            self.results_data[contig].karyotype = [None for n in range(self.results_data[contig].test.n_samples)]
+            self.results_data[contig].mean_karyotype = [None for n in range(self.results_data[contig].test.n_samples)]
+            
+            for sample_i in range(self.results_data[contig].test.n_samples):
+                n_gen = self.results_data[contig].test.het_tree[sample_i].shape[0]
+                if n_gen > 1:
+                    het_tree = self.results_data[contig].test.het_tree[sample_i]
+                    karyotypes = het_tree[:n_gen/2] - het_tree[:n_gen/2-1:-1]
+                    self.results_data[contig].karyotype[sample_i] = karyotypes
+                    genotype_scores = self.results_data[contig].het_tree_scores[sample_i].reshape(n_gen,1)                                                         
+                    karyotype_scores = np.abs(genotype_scores[:n_gen/2] - genotype_scores[:n_gen/2-1:-1])
+                    print karyotype_scores
+                    self.results_data[contig].mean_karyotype[sample_i] = np.sum(karyotype_scores*karyotypes,axis=1)/np.sum(karyotype_scores)
+
     def plot(self):
         """Plot the distribution of ancestral probabilities"""
         sample_names = next(iter(self.test_data.values())).sample_names
