@@ -191,18 +191,45 @@ class Simulation(object):
         if n_parentsB is None:
             n_parentsB = len(self.populations[popB].individuals)
             
-        parentsA = self.rng.choice(self.rng.choice(self.populations[popA].individuals, size=n_parentsA, replace=False), size=n_children)
-        parentsB = self.rng.choice(self.rng.choice(self.populations[popB].individuals, size=n_parentsB, replace=False), size=n_children)
+
 
         self.populations[popAB] = Population([], name=popAB, rng=self.rng, reference=self.reference)
         
         if self.ploidy == 'N':
             for i in range(n_children):
-                gen = self.recombineHaploid(parentsA[i].genomeA, parentsB[i].genomeA, ratio=ratio)
-                self.populations[popAB].individuals.append(Individual(genomeA=np.copy(gen), 
+                parentsA = self.rng.choice(self.rng.choice(self.populations[popA].individuals, size=n_parentsA, replace=False), size=n_children)
+                parentsB = self.rng.choice(self.rng.choice(self.populations[popB].individuals, size=n_parentsB, replace=False), size=n_children)
+                
+                genA,_ = self.recombineHaploid(parentsA[i].genomeA, parentsB[i].genomeA, ratio=ratio)
+                self.populations[popAB].individuals.append(Individual(genomeA=np.copy(genA), 
                                                                       reference=self.reference,
                                                                       ploidy=self.ploidy,
                                                                       rng=self.rng))
+        elif self.ploidy == 'N+N':
+            ## Select the individuals involved in the hybridisations 
+            individualsA = self.rng.choice(self.populations[popA].individuals, size=n_parentsA, replace=False)
+            individualsB = self.rng.choice(self.populations[popB].individuals, size=n_parentsB, replace=False)
+            
+            ## Flat array of their haploid genomes 
+            genomesA = np.array([[x.genomeA, x.genomeB] for x in individualsA]).flatten()
+            genomesB = np.array([[x.genomeA, x.genomeB] for x in individualsB]).flatten()
+            
+            ## Select the haploid genomes to hybridise
+            parentsA = self.rng.choice(genomesA, size=(n_children, 2))
+            parentsB = self.rng.choice(genomesB, size=(n_children, 2))
+            
+            for i in range(n_children):
+                gens = list(self.recombineHaploid(parentsA[i][0], parentsB[i][0], ratio=ratio)) \
+                     + list(self.recombineHaploid(parentsA[i][1], parentsB[i][1], ratio=ratio))
+                
+                A, B = self.rng.choice(range(4), size=2, replace=False)
+                
+                self.populations[popAB].individuals.append(Individual(genomeA=np.copy(gens[A]),
+                                                                      genomeB=np.copy(gens[B]), 
+                                                                      reference=self.reference,
+                                                                      ploidy=self.ploidy,
+                                                                      rng=self.rng))
+            
 
             
     def recombineHaploid(self, genA, genB, ratio ):
@@ -211,7 +238,7 @@ class Simulation(object):
         parent = self.rng.uniform(size=len(self.markers_per_contig)) > ratio
         for contig,_ in enumerate(self.markers_per_contig):
             parent_mask += [parent[contig] for i in range(self.markers_per_contig[contig])]
-        return np.where(parent_mask, genA, genB)
+        return np.where(parent_mask, genA, genB), np.where(parent_mask, genB, genA)
     
     def write(self, folder):
         """docstring for write"""
