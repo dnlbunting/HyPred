@@ -112,7 +112,17 @@ class Population(object):
                     
         df = pd.DataFrame( np.vstack( ([self.name]*len(contig_loci), contig_loci, pop)).T, columns = ['group', 'markers']+['sample'+str(i) for i in range(pop.shape[0])])
         df.to_csv(self.name+'.csv', index=False)
+    
+    def stats(self):
+        """docstring for stats"""
+        print("\nPopulation {0} statistics\n".format(self.name) + "-"*60 )
+        het = [np.sum(x.genomeA != x.genomeB)/float(len(x.genomeA)) for x in self.individuals]
+        print("Heterokaryotic ratio {0}".format("\t".join(["{0:.3f}".format(x) for x in  het])))
+        print("Mean heterokaryotic ratio {0}".format(np.mean(het)))
         
+        print("-"*60)
+            
+
     @property
     def n_individuals(self):
         return len(self.individuals)
@@ -170,19 +180,17 @@ class Simulation(object):
             copied_indvs = [copy.deepcopy(in_pop.individuals[c]) for c in choices]
             self.populations[pop] = Population(copied_indvs, name=pop, rng=self.rng, reference=self.reference)
     
-    def exchangeNuclei(self, popA, popB, popAB, n_children):
+    def exchangeNuclei(self, popA, popB, popAB):
         """Create n_children individuals with genomeA coming from a random 
         individual in popA and genomeB from an individual in popB"""
         
-        parentsA = self.rng.choice(self.populations[popA].individuals, size=n_children)
-        parentsB = self.rng.choice(self.populations[popB].individuals, size=n_children)
+        parentsA = self.rng.choice(self.populations[popA].individuals)
+        parentsB = self.rng.choice(self.populations[popB].individuals)
         self.populations[popAB] = Population([], name=popAB, rng=self.rng, reference=self.reference)
         
-        for i in range(n_children):
-            hybrid = copy.deepcopy(parentsA[i])
-            hybrid.genomeB = copy.deepcopy(parentsB[i].genomeB)
-            
-            self.populations[popAB].individuals.append(hybrid)
+        hybrid = copy.deepcopy(parentsA)
+        hybrid.genomeB = copy.deepcopy(parentsB.genomeB)
+        self.populations[popAB].individuals.append(hybrid)
     
     def recombineContigs(self, popA, popB, popAB, n_children, n_parentsA=None, n_parentsB=None, ratio=0.5):
         """docstring for recombine"""
