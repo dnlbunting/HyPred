@@ -25,10 +25,13 @@ class Data(object):
         self.contig = contig
         self.sample_names = sample_names
         self.n_samples, self.n_loci = X.shape
+        self.het_X = None
         
         if sample_names is not None:
             assert len(sample_names) == X.shape[0], "Dimensions of sample_names must match X"
-
+            
+ 
+ 
 
 ## Data containers
 class TrainData(Data):
@@ -79,22 +82,23 @@ class Result(object):
         
     @property
     def pred(self):
-        try:
-            return self.__pred
-        except AttributeError:
-            self.__pred = np.empty_like(self.p0, dtype=np.object)
+        self.__pred = np.empty_like(self.p0, dtype=np.object)
+        if type(self.p0[0]) is list:
+            self.__pred = [map(_pred, x) for x in self.p0]
+        else:
+            self.__pred = map(_pred, self.p0)
             
-            for i in range(self.p0.shape[0]):
-                if self.p0[i] > 0.9:
-                    self.__pred[i] = 'popB'
-                elif self.p0[i] < 0.1:
-                    self.__pred[i] = 'popA'
-                else:
-                    self.__pred[i] = 'X'
-            return self.__pred
-                
-
-
+        return self.__pred
+   
+   
+   
+def _pred(p):
+    if p > 0.9:
+        return 'popB'
+    elif p < 0.1:
+        return 'popA'
+    else:
+        return 'X'
 
 
 
@@ -145,12 +149,27 @@ def encode(marker_df, ref, enc_function):
     """
     
     encoded = np.empty((marker_df.shape[0], marker_df.shape[1]-1), dtype=np.object)
+    stats = {'Homokaryotic reference':0, 'Heterokaryotic reference/variant':0, 'Homokaryotic variant':0, 'Heterokaryotic variant':0, 'missing':0}
     
     for i,line in enumerate(marker_df.iterrows()):
         data = np.array(line[1][1:])
-        row = [enc_function(ref[line[1][0]], str(x)) for x in data]
+        row = [enc_function(ref[line[1][0]], str(x), stats) for x in data]
         encoded[i] = row
+    
+    print("-"*60)
         
+    for k,v in stats.items():
+        print("{0}: {1}".format(k,v))
+        
+    cov = float(stats['Homokaryotic reference'] + stats['Heterokaryotic reference/variant'] + stats['Homokaryotic variant'] + stats['Heterokaryotic variant'])
+    
+    print("\nHomo: {0:.2f}%  Hetero: {1:.2f}%".format(100*(stats['Homokaryotic reference']+stats['Homokaryotic variant'])/cov, 
+                                                    100*(stats['Heterokaryotic reference/variant']+stats['Heterokaryotic variant']) /cov ) )
+                                                    
+    print("Covered: {0:.2f}%  Missing: {1:.2f}%".format(100*cov/(stats['missing']+cov),
+                                                       100*stats['missing']/(stats['missing']+cov) )) 
+                                                       
+    print("-"*60)
     return encoded
 
 def contig_bunch(marker, loci):
@@ -271,17 +290,17 @@ def create_test_data_heterokaryotic(markersAB, hom_encode_func, het_encode_func,
 ## Core pipeline
 class HyPred(object):
     """docstring for HyPred"""
-    def __init__(self, train_data=None, test_data=None, C=1.0, acc_cutoff=0.95, cv_folds=10, classifier=None):
+    def __init__(self, train_data=None, test_data=None, C=1.0, penalty='l1', acc_cutoff=0.95, cv_folds=10, classifier=None):
         self.train_data = train_data
         self.test_data = test_data
         self.C = C
         self.acc_cutoff = acc_cutoff
         self.cv_folds = cv_folds
         self.classifier = classifier
-        
+        self.penalty = penalty
         
         if self.classifier is None:
-            self.classifier = lambda : LogisticRegression(class_weight='balanced', penalty='l1', C=self.C, fit_intercept=False)
+            self.classifier = lambda : LogisticRegression(class_weight='balanced', penalty=self.penalty, C=self.C, fit_intercept=False)
     
     def train(self):
         
@@ -337,14 +356,34 @@ class HyPred(object):
         for contig in self.selected_contigs:
             self.results_data[contig].test = self.test_data[contig]
             
-            self.results_data[contig].p0 = np.array(self.results_data[contig].classifier.predict_proba(self.test_data[contig].X))[:,0]
             if use_het is True:
-                self.results_data[contig].het_tree_scores = np.array([self.results_data[contig].classifier.decision_function(x) 
+                self.results_data[contig].het_tree_p = np.array([self.results_data[contig].classifier.predict_proba(x)[:,0] 
                                                                       for x in self.test_data[contig].het_tree])
-                                                                      
-                                                                      
-            self.pred_matrix.append(self.results_data[contig].pred)
-            self.p0_matrix.append(self.results_data[contig].p0)
+                self.results_data[contig].karyotype = []
+                self.results_data[contig].p0 = []
+                
+                for sample_i in range(self.results_data[contig].test.n_samples):
+                    n_gen = self.results_data[contig].test.het_tree[sample_i].shape[0]
+                    het_tree = self.results_data[contig].test.het_tree[sample_i]
+                    genotype_p = self.results_data[contig].het_tree_p[sample_i].reshape(n_gen)
+                    if n_gen > 1:
+                        p = [genotype_p[:n_gen/2],genotype_p[:n_gen/2-1:-1]]
+                        karyotype_p = (1-np.min(p,axis=0))*np.max(p, axis=0)
+                        self.results_data[contig].karyotype.append((het_tree[np.argmax(karyotype_p)], het_tree[-(np.argmax(karyotype_p)+1)]))
+                        self.results_data[contig].p0.append([np.min(p,axis=0)[0] ,np.max(p, axis=0)[0]]) 
+
+                    else:
+                        self.results_data[contig].p0.append([genotype_p[0],genotype_p[0]])
+                        
+                        
+                self.p0_matrix.append(np.array(self.results_data[contig].p0)[:,0])
+                self.p0_matrix.append(np.array(self.results_data[contig].p0)[:,1])
+                self.pred_matrix.append(['/'.join(x) for x in self.results_data[contig].pred])
+            
+            else:
+                self.results_data[contig].p0 = np.array(self.results_data[contig].classifier.predict_proba(self.test_data[contig].X))[:,0]
+                self.pred_matrix.append(self.results_data[contig].pred)
+                self.p0_matrix.append(self.results_data[contig].p0)
             
         self.pred_matrix = np.array(self.pred_matrix)
         self.p0_matrix = np.array(self.p0_matrix)
@@ -354,18 +393,30 @@ class HyPred(object):
         for contig in self.results_data.keys():
             self.results_data[contig].karyotype = [None for n in range(self.results_data[contig].test.n_samples)]
             self.results_data[contig].mean_karyotype = [None for n in range(self.results_data[contig].test.n_samples)]
+            self.results_data[contig].karyotype_scores = [None for n in range(self.results_data[contig].test.n_samples)]
+            self.results_data[contig].karyotype_p = [None for n in range(self.results_data[contig].test.n_samples)]
+            self.results_data[contig].best_karyotype = [None for n in range(self.results_data[contig].test.n_samples)]
             
             for sample_i in range(self.results_data[contig].test.n_samples):
                 n_gen = self.results_data[contig].test.het_tree[sample_i].shape[0]
+                
                 if n_gen > 1:
                     het_tree = self.results_data[contig].test.het_tree[sample_i]
-                    karyotypes = het_tree[:n_gen/2] - het_tree[:n_gen/2-1:-1]
-                    self.results_data[contig].karyotype[sample_i] = karyotypes
-                    genotype_scores = self.results_data[contig].het_tree_scores[sample_i].reshape(n_gen,1)                                                         
-                    karyotype_scores = np.abs(genotype_scores[:n_gen/2] - genotype_scores[:n_gen/2-1:-1])
-                    print karyotype_scores
-                    self.results_data[contig].mean_karyotype[sample_i] = np.sum(karyotype_scores*karyotypes,axis=1)/np.sum(karyotype_scores)
+                    
+                    #karyotypes = 0.5*(het_tree[:n_gen/2] - het_tree[:n_gen/2-1:-1])
+                    #self.results_data[contig].karyotype[sample_i] = karyotypes
+                    
+                    #genotype_scores = self.results_data[contig].het_tree_scores[sample_i].reshape(n_gen,1)
+                    genotype_p = self.results_data[contig].het_tree_p[sample_i].reshape(n_gen,1)
+                    
+                    #karyotype_scores = np.abs(genotype_scores[:n_gen/2] - genotype_scores[:n_gen/2-1:-1])
+                    p = [genotype_p[:n_gen/2],genotype_p[:n_gen/2-1:-1]]
+                    karyotype_p = (1-np.min(p,axis=0))*np.max(p, axis=0)
 
+                    #self.results_data[contig].karyotype_scores[sample_i] = karyotype_scores
+                    self.results_data[contig].karyotype_p[sample_i] = karyotype_p
+                    #self.results_data[contig].mean_karyotype[sample_i] = np.sum(karyotype_p*karyotypes,axis=0)/np.sum(karyotype_p)
+                    self.results_data[contig].karyotype[sample_i] = (het_tree[np.argmax(karyotype_p)], het_tree[-(np.argmax(karyotype_p)+1)])
 
     def plot(self):
         """Plot the distribution of ancestral probabilities"""
@@ -381,15 +432,19 @@ class HyPred(object):
         """Summary table of ancestral predictions"""
         sample_names = next(iter(self.test_data.values())).sample_names
         
-        A = np.sum(self.pred_matrix == "popA", axis=0)
-        B = np.sum(self.pred_matrix == "popB", axis=0)
-        X = np.sum(self.pred_matrix == "X", axis=0)
+        A = np.sum(np.logical_or(self.pred_matrix == "popA",self.pred_matrix == "popA/popA"), axis=0)
+        B = np.sum(np.logical_or(self.pred_matrix == "popB", self.pred_matrix == "popB/popB"), axis=0)
+        C = np.sum(self.pred_matrix == "popA/popB", axis=0)
+        XB = np.sum(self.pred_matrix == "X/popB", axis=0)
+        AX = np.sum(self.pred_matrix == "popA/X", axis=0)
+        X = np.sum(np.logical_or(self.pred_matrix == "X",self.pred_matrix == "X/X"), axis=0)
+        
         ratio = np.array(A, dtype=np.float)/B
         
-        print("Sample  \tpopA\tpopB\tno pred\tratio")
+        print("Sample  \tpopA\tpopB\tpopA/popB\t\tno pred\tratio")
         print("-"*60)
         for i in range(len(sample_names)):
-            print("{0}\t{1}\t{2}\t{3}\t{4:.2f}".format(sample_names[i], A[i], B[i], X[i], ratio[i]))
+            print("{0}\t{1}\t{2}\t{3}\t{4}\t{5:.2f}".format(sample_names[i], A[i], B[i], C[i], AX[i]+XB[i]+X[i], ratio[i]))
     
     def examine_contig(self, contig=None):
         if contig is None:
@@ -409,11 +464,6 @@ class HyPred(object):
         
         print("\nCV Accuracy: {0:.2f}".format(np.mean(self.results_data[contig].cv)))
         
-        print("Sample  \tPrediction\t Pr(B)")
-        print("-"*40)
-        for s,p, p0 in zip(self.test_data[contig].sample_names, self.results_data[contig].pred, self.results_data[contig].p0  ):
-            print("{0}\t{1}\t{2:.2f}".format(s,p,p0))
-            
         plt.matshow(np.array(self.results_data[contig].classifier.coef_, dtype=np.float), 
                             vmax=abs(self.results_data[contig].classifier.coef_).max(), 
                             vmin=-abs(self.results_data[contig].classifier.coef_).max(), 
@@ -421,5 +471,12 @@ class HyPred(object):
         plt.xticks(range(len(self.test_data[contig].pos)), self.test_data[contig].pos, rotation=90, size=4)
         plt.title("Weight matrix")
     
+        
+        
+        print("Sample  \tPrediction\t Pr(B)")
+        print("-"*40)
+        for s,p, p0 in zip(self.test_data[contig].sample_names, self.results_data[contig].pred, self.results_data[contig].p0  ):
+            print("{0}\t{1}\t{2:.2f}".format(s,p,p0))
+            
 
 

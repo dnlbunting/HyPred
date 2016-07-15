@@ -1,47 +1,57 @@
 #!/usr/bin/env python
 
-def encode_het(ref, obs):
+def encode_het(ref, obs, stats=None):
     
     if obs == ref*2:
         ## Homokaryotic match for refetrecne 
+        stats['Homokaryotic reference']+=1
         return [-1]
         
     elif obs == '-9-9' or obs == float('nan'):
         ## Missing data
+        stats['missing']+=1
         return [0]
         
     elif ref in obs:
         ## Heterokaryotic, one is match for reference
+        stats['Heterokaryotic reference/variant']+=1
         return [-1,+1]
         
     elif obs[0] == obs[1]:
         ## Homokaryotic, differnt from reference
+        stats['Homokaryotic variant']+=1
         return [+1]
 
     else:
         ## Heterokaryotic, neither match reference
+        stats['Heterokaryotic variant']+=1
         return [+1]
     
-def discard_het(ref, obs):
+def discard_het(ref, obs, stats=None):
     
     if obs == ref*2:
         ## Homokaryotic match for refetrecne 
+        stats['Homokaryotic reference']+=1
         return -1
         
     elif obs == '-9-9' or obs == float('nan'):
         ## Missing data
+        stats['missing']+=1
         return 0
         
     elif ref in obs:
         ## Heterokaryotic, one is match for reference
+        stats['Heterokaryotic reference/variant']+=1
         return 0
         
     elif obs[0] == obs[1]:
         ## Homokaryotic, differnt from reference
+        stats['Homokaryotic variant']+=1
         return 1
 
     else:
         ## Heterokaryotic, neither match reference
+        stats['Heterokaryotic variant']+=1
         return 0
 
 def half_count(ref, obs):
