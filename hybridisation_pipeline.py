@@ -520,7 +520,7 @@ class HyPred(object):
         print("-"*60)
         for i in range(len(sample_names)):
             print("{0}\t{1}\t{2}\t{3}\t{4}\t{5:.2f}".format(sample_names[i], A[i], B[i], C[i], AX[i]+XB[i]+X[i], ratio[i]))
-    
+        return (sample_names, A,B,C,XB,AX,X)
     def examine_contig(self, contig=None):
         if contig is None:
             contig = next(iter(self.results_data.keys()))
