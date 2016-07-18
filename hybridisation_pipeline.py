@@ -72,10 +72,11 @@ class TestData(Data):
             
     def growHetTree(self):
         """Unpacks the compressed representation of heterokaryotic data to a full tree of possible configurations"""
-        
         self.het_tree = [None for i in range(len(self.sample_names))]
         for sample_i in range(self.het_X.shape[0]):
             het_sites = np.sum([len(x) == 2 for x in self.het_X[sample_i]])
+            if het_sites > 16:
+                raise Exception("To many hetrokaryotic sites")
             self.het_tree[sample_i] = np.empty((2**het_sites, self.n_loci), dtype=np.int8)
             i = np.arange(2**het_sites)
             
@@ -446,7 +447,12 @@ class HyPred(object):
             self.results_data[contig].test = self.test_data[contig]
             
             if use_het is True:
-                self.test_data[contig].growHetTree()
+                try:
+                    self.test_data[contig].growHetTree()
+                except:
+                    print "Failed growing genotype tree for contig {0}".format(contig)
+                    continue
+                    
                 self.results_data[contig].het_tree_p = np.array([self.results_data[contig].classifier.predict_proba(x)[:,0] 
                                                                       for x in self.test_data[contig].het_tree])
                 self.results_data[contig].karyotype = []
@@ -469,7 +475,8 @@ class HyPred(object):
                 self.p0_matrix.append(np.array(self.results_data[contig].p0)[:,0])
                 self.p0_matrix.append(np.array(self.results_data[contig].p0)[:,1])
                 self.pred_matrix.append(['/'.join(x) for x in self.results_data[contig].pred])
-            
+                
+                del self.test_data[contig].het_tree
             else:
                 self.results_data[contig].p0 = np.array(self.results_data[contig].classifier.predict_proba(self.test_data[contig].X))[:,0]
                 self.pred_matrix.append(self.results_data[contig].pred)
