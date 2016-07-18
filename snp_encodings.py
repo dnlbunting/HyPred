@@ -1,16 +1,16 @@
 #!/usr/bin/env python
 
 def encode_het(ref, obs, stats=None):
-    
-    if obs == ref*2:
-        ## Homokaryotic match for refetrecne 
-        stats['Homokaryotic reference']+=1
-        return [-1]
-        
-    elif obs == '-9-9' or obs == float('nan'):
+    assert len(obs) == 2, "Invalid snp {0}".format(obs)
+    if '-9' in obs or obs == float('nan'):
         ## Missing data
         stats['missing']+=1
         return [0]
+        
+    elif obs == ref*2:
+        ## Homokaryotic match for refetrecne 
+        stats['Homokaryotic reference']+=1
+        return [-1]
         
     elif ref in obs:
         ## Heterokaryotic, one is match for reference
@@ -29,15 +29,15 @@ def encode_het(ref, obs, stats=None):
     
 def discard_het(ref, obs, stats=None):
     
-    if obs == ref*2:
-        ## Homokaryotic match for refetrecne 
-        stats['Homokaryotic reference']+=1
-        return -1
-        
-    elif obs == '-9-9' or obs == float('nan'):
+    if '-9' in obs or obs == float('nan'):
         ## Missing data
         stats['missing']+=1
         return 0
+        
+    elif obs == ref*2:
+        ## Homokaryotic match for refetrecne 
+        stats['Homokaryotic reference']+=1
+        return -1
         
     elif ref in obs:
         ## Heterokaryotic, one is match for reference
