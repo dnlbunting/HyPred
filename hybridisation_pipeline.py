@@ -328,9 +328,12 @@ def _get_mask(X, value_to_mask):
         
 class Imputer(sklearn.preprocessing.Imputer):
     """docstring for Imputer"""
-    def __init__(self, *args, **kwargs):
+    def __init__(self, weight=1., wc=None, *args, **kwargs):
         super(Imputer, self).__init__(*args, **kwargs)
-
+        
+        self.weight = weight
+        self.wc = wc
+        
     def transform(self, X):
         """Impute all missing values in X.
 
@@ -360,7 +363,12 @@ class Imputer(sklearn.preprocessing.Imputer):
 
         mask = _get_mask(X, self.missing_values)
         n_missing = np.sum(mask, axis=self.axis)
-        values = np.repeat(valid_statistics, n_missing)
+        n_present = np.sum(np.logical_not(mask), axis=self.axis)
+
+        if self.wc is not None:
+            values = np.repeat(valid_statistics*np.where(n_present > self.wc, 1., n_present/float(self.wc)), n_missing)
+        else:
+            values = np.repeat(valid_statistics*self.weight, n_missing)
 
         if self.axis == 0:
             coordinates = np.where(mask.transpose())[::-1]
