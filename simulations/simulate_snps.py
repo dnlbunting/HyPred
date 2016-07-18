@@ -19,13 +19,15 @@ def mut(a,b):
 class Individual(object):
     """docstring for Individual"""
 
-    def __init__(self, reference, genomeA=None, genomeB=None, ploidy='N', lineage=None, rng=None):
+    def __init__(self, reference, genomeA=None, genomeB=None, ploidy='N', lineage=None, rng=None, recombMapA=None, recombMapB=None):
         self.reference = reference
         self.ploidy = ploidy
         self.genomeA = genomeA
         self.genomeB = genomeB
         self.lineage = lineage
         self.rng = rng
+        self.recombMapA=recombMapA
+        self.recombMapB=recombMapB
         
         if self.rng is None:
             self.rng = np.random.RandomState()
@@ -84,7 +86,10 @@ class Population(object):
         
         if self.rng is None:
             self.rng = np.random.RandomState()
-        
+    @property
+    def n_contigs(self):
+        return self.reference['contig'][-1]+1
+           
     def mutate(self, mutation_mean, mutation_sd):
         """docstring for mutate"""
         for indv in self.individuals:
@@ -95,20 +100,43 @@ class Population(object):
         contig_loci = ["{0}_{1}".format(c,l) for c,l in zip(self.reference['contig'], self.reference['loci'])]
         
         if self.individuals[0].ploidy == 'N':
-            pop = np.vstack([indv.genomeA for indv in self.individuals])
+            pop = np.vstack([indv.genomeA for indv in self.individuals], columns = ['group', 'markers']+['sample'+str(i) for i in range(pop.shape[0])])
+                        
             for i in range(pop.shape[0]):
                 for j in range(pop.shape[1]):
                     pop[i,j] = str(pop[i,j])*2
                     
+            if self.individuals[0].recombMapA is not None:
+                index = np.concatenate( ( np.atleast_2d([self.name]*self.n_contigs).T,
+                                                np.atleast_2d(range(self.n_contigs)).T), axis=1)
+                recombMapA = np.vstack([indv.recombMapA for indv in self.individuals])
+                pd.DataFrame(np.concatenate( (index, np.atleast_2d(recombMapA).T ), axis=1 ),
+                             columns = ['group', 'markers']+['sample'+str(i) for i in range(pop.shape[0])]).to_csv(self.name+".recombmapA", index=False)
+            
+                    
         else:
             genA = np.vstack([indv.genomeA for indv in self.individuals])
             genB = np.vstack([indv.genomeB for indv in self.individuals])
+            
             pop = np.empty_like(genA)
         
             for i in range(pop.shape[0]):
                 for j in range(pop.shape[1]):
                     pop[i,j] = str(genA[i,j])+str(genB[i,j])
                     
+            if self.individuals[0].recombMapA is not None:
+                index = np.concatenate( ( np.atleast_2d([self.name]*self.n_contigs).T,
+                                                np.atleast_2d(range(self.n_contigs)).T), axis=1)
+    
+                recombMapA = np.vstack([indv.recombMapA for indv in self.individuals])
+                pd.DataFrame(np.concatenate( (index, np.atleast_2d(recombMapA).T ), axis=1 ),
+                             columns = ['group', 'markers']+['sample'+str(i) for i in range(pop.shape[0])]).to_csv(self.name+".recombmapA", index=False)
+                
+                recombMapB = np.vstack([indv.recombMapB for indv in self.individuals])
+                pd.DataFrame(np.concatenate( (index, np.atleast_2d(recombMapB).T ), axis=1 ), 
+                            columns = ['group', 'markers']+['sample'+str(i) for i in range(pop.shape[0])]).to_csv(self.name+".recombmapB", index=False)
+                                
+        
         df = pd.DataFrame( np.vstack( ([self.name]*len(contig_loci), contig_loci, pop)).T, columns = ['group', 'markers']+['sample'+str(i) for i in range(pop.shape[0])])
         df.to_csv(self.name+'.csv', index=False)
     
@@ -118,9 +146,8 @@ class Population(object):
         het = [np.sum(x.genomeA != x.genomeB)/float(len(x.genomeA)) for x in self.individuals]
         print("Heterokaryotic ratio {0}".format("\t".join(["{0:.3f}".format(x) for x in  het])))
         print("Mean heterokaryotic ratio {0}".format(np.mean(het)))
-        
         print("-"*60)
-            
+
     @property
     def n_individuals(self):
         return len(self.individuals)
@@ -135,6 +162,7 @@ class Simulation(object):
     
     def create_reference(self, n_contigs, markers_mean, prefix=""):
         
+        self.n_contigs = n_contigs
         self.markers_per_contig = np.array(self.rng.exponential(markers_mean, size=n_contigs), dtype=np.int) + 1
         self.reference = {}
         
@@ -187,7 +215,11 @@ class Simulation(object):
         self.populations[popAB] = Population([], name=popAB, rng=self.rng, reference=self.reference)
         
         hybrid = copy.deepcopy(parentsA)
+
+        hybrid.recombMapA  = [popA]*self.n_contigs
         hybrid.genomeB = copy.deepcopy(parentsB.genomeB)
+        hybrid.recombMapB  = [popB]*self.n_contigs
+        
         self.populations[popAB].individuals.append(hybrid)
     
     def recombineContigs(self, popA, popB, popAB, n_children, n_parentsA=None, n_parentsB=None, ratio=0.5):
@@ -206,8 +238,9 @@ class Simulation(object):
                 parentsA = self.rng.choice(self.rng.choice(self.populations[popA].individuals, size=n_parentsA, replace=False), size=n_children)
                 parentsB = self.rng.choice(self.rng.choice(self.populations[popB].individuals, size=n_parentsB, replace=False), size=n_children)
                 
-                genA,_ = self.recombineHaploid(parentsA[i].genomeA, parentsB[i].genomeA, ratio=ratio)
+                genA,recombMapA,_,_ = self.recombineHaploid(parentsA[i].genomeA, parentsB[i].genomeA, ratio=ratio, popA=popA, popB=popB)
                 self.populations[popAB].individuals.append(Individual(genomeA=np.copy(genA), 
+                                                                      recombMapA=recombMapA,
                                                                       reference=self.reference,
                                                                       ploidy=self.ploidy,
                                                                       rng=self.rng))
@@ -225,22 +258,23 @@ class Simulation(object):
             genomesB = [indv.genomeA if self.rng.rand() > 0.5 else indv.genomeB for indv in parentsB]
 
             for i in range(n_children):
-                genA, genB = self.recombineHaploid(genomesA[i], genomesB[i], ratio=ratio) 
+
+                genA, recombMapA, genB, recombMapB = self.recombineHaploid(genomesA[i], genomesB[i], ratio=ratio, popA=popA, popB=popB) 
                 self.populations[popAB].individuals.append(Individual(genomeA=np.copy(genA),
                                                                       genomeB=np.copy(genB), 
+                                                                      recombMapA=recombMapA,
+                                                                      recombMapB=recombMapB,
                                                                       reference=self.reference,
                                                                       ploidy=self.ploidy,
                                                                       rng=self.rng))
-            
-
-            
-    def recombineHaploid(self, genA, genB, ratio ):
+    
+    def recombineHaploid(self, genA, genB, ratio, popA, popB):
         """docstring for recombineHaploid"""
         parent_mask = []
         parent = self.rng.uniform(size=len(self.markers_per_contig)) > ratio
         for contig,_ in enumerate(self.markers_per_contig):
             parent_mask += [parent[contig] for i in range(self.markers_per_contig[contig])]
-        return np.where(parent_mask, genA, genB), np.where(parent_mask, genB, genA)
+        return np.where(parent_mask, genA, genB), np.where(parent, popA, popB), np.where(parent_mask, genB, genA), np.where(parent, popB, popA)
     
     def write(self, folder):
         """docstring for write"""
