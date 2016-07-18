@@ -105,6 +105,9 @@ class Result(object):
     @property
     def pred(self):
         self.__pred = np.empty_like(self.p0, dtype=np.object)
+        if self.p0 is None:
+            return None
+            
         if type(self.p0[0]) is list:
             self.__pred = [map(_pred, x) for x in self.p0]
         else:
