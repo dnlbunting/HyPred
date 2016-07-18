@@ -7,10 +7,13 @@ from collections import defaultdict
 import sklearn
 from sklearn.linear_model import LogisticRegression
 from  sklearn import cross_validation
+import sklearn.preprocessing 
 import matplotlib
 import matplotlib.cm as cm 
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
+import numpy.ma as ma
+from matplotlib.colors import ListedColormap
 
 
 lett_to_num = {'A':1,'T':2, 'G':3, "C":4}
@@ -29,7 +32,9 @@ class Data(object):
         
         if sample_names is not None:
             assert len(sample_names) == X.shape[0], "Dimensions of sample_names must match X"
-            
+        
+        
+
  
  
 
@@ -40,6 +45,21 @@ class TrainData(Data):
         super(TrainData, self).__init__(X, pos, contig, sample_names)
         self.y = y
 
+    def __deepcopy__(self, memo):
+        cls = self.__class__
+        result = cls.__new__(cls)
+        memo[id(self)] = result
+    
+    
+        ## Deep copy everything...
+        for k, v in self.__dict__.items():
+            setattr(result, k, copy.deepcopy(v, memo))
+        
+        ## Override deep copy for the arrays to use np.copy, as apparently deepcopy(np.array) isn't working....
+        setattr(result, 'X', np.copy(self.X))
+        setattr(result, 'y', np.copy(self.y))
+        return result
+    
 class TestData(Data):
     """Class for storing per contig test data"""
     def __init__(self, X, pos, contig, truth=None, sample_names=None, het_X=None):
@@ -47,8 +67,8 @@ class TestData(Data):
         self.het_X = het_X
         self.truth = truth
         
-        if self.het_X is not None:
-            self.growHetTree()
+        #if self.het_X is not None:
+        #    self.growHetTree()
             
     def growHetTree(self):
         """Unpacks the compressed representation of heterokaryotic data to a full tree of possible configurations"""
@@ -79,6 +99,7 @@ class Result(object):
         self.cv = cv
         self.classifier = classifier
         self.p0 = p0
+        self.contig=contig
         
     @property
     def pred(self):
@@ -100,7 +121,17 @@ def _pred(p):
     else:
         return 'X'
 
+col = ListedColormap(['white', 'red', 'blue', 'green'], 'indexed')
 
+def mp(x):
+    if x == [0]:
+        return 0
+    elif x == [1]:
+        return 1
+    elif x == [-1]:
+        return 2
+    elif x == [-1,1]:
+        return 3
 
 ## Preprocessing
 def load_data(markersA_file, markersB_file, markersAB_file, ref_file, contig_data_file=None):
@@ -286,6 +317,64 @@ def create_test_data_heterokaryotic(markersAB, hom_encode_func, het_encode_func,
                                 sample_names = list(markersAB.columns[1:]))
     return test_data
 
+def _get_mask(X, value_to_mask):
+    """Compute the boolean mask X == missing_values."""
+    if value_to_mask == "NaN" or np.isnan(value_to_mask):
+        return np.isnan(X)
+    else:
+        return X == value_to_mask
+
+        
+class Imputer(sklearn.preprocessing.Imputer):
+    """docstring for Imputer"""
+    def __init__(self, *args, **kwargs):
+        super(Imputer, self).__init__(*args, **kwargs)
+
+    def transform(self, X):
+        """Impute all missing values in X.
+
+        Parameters
+        ----------
+        X : {array-like, sparse matrix}, shape = [n_samples, n_features]
+            The input data to complete.
+        """
+        # Copy just once
+
+
+        statistics = self.statistics_
+        # Delete the invalid rows/columns
+        invalid_mask = np.array(np.zeros_like(statistics), dtype=bool)
+        valid_mask = np.logical_not(invalid_mask)
+        valid_statistics = statistics[valid_mask]
+        valid_statistics_indexes = np.where(valid_mask)[0]
+        missing = np.arange(X.shape[not self.axis])[invalid_mask]
+
+        if self.axis == 0 and invalid_mask.any():
+            if self.verbose:
+                warnings.warn("Deleting features without "
+                              "observed values: %s" % missing)
+            X = X[:, valid_statistics_indexes]
+
+        # Do actual imputation
+
+        mask = _get_mask(X, self.missing_values)
+        n_missing = np.sum(mask, axis=self.axis)
+        values = np.repeat(valid_statistics, n_missing)
+
+        if self.axis == 0:
+            coordinates = np.where(mask.transpose())[::-1]
+        else:
+            coordinates = mask
+
+        X[coordinates] = values
+        X[np.isnan(np.array(X, dtype=np.float))]  = 0
+        
+        return np.array(X, dtype=np.float)
+    
+    def impute(self, X, y):
+        return np.vstack((self.fit(X[y==1,:]).transform(X[y==1,:]) , 
+                          self.fit(X[y==0,:]).transform(X[y==0,:])))
+
 
 ## Core pipeline
 class HyPred(object):
@@ -357,6 +446,7 @@ class HyPred(object):
             self.results_data[contig].test = self.test_data[contig]
             
             if use_het is True:
+                self.test_data[contig].growHetTree()
                 self.results_data[contig].het_tree_p = np.array([self.results_data[contig].classifier.predict_proba(x)[:,0] 
                                                                       for x in self.test_data[contig].het_tree])
                 self.results_data[contig].karyotype = []
@@ -388,36 +478,6 @@ class HyPred(object):
         self.pred_matrix = np.array(self.pred_matrix)
         self.p0_matrix = np.array(self.p0_matrix)
         
-    def inferKaryotype(self):
-        """docstring for inferKaryotype"""
-        for contig in self.results_data.keys():
-            self.results_data[contig].karyotype = [None for n in range(self.results_data[contig].test.n_samples)]
-            self.results_data[contig].mean_karyotype = [None for n in range(self.results_data[contig].test.n_samples)]
-            self.results_data[contig].karyotype_scores = [None for n in range(self.results_data[contig].test.n_samples)]
-            self.results_data[contig].karyotype_p = [None for n in range(self.results_data[contig].test.n_samples)]
-            self.results_data[contig].best_karyotype = [None for n in range(self.results_data[contig].test.n_samples)]
-            
-            for sample_i in range(self.results_data[contig].test.n_samples):
-                n_gen = self.results_data[contig].test.het_tree[sample_i].shape[0]
-                
-                if n_gen > 1:
-                    het_tree = self.results_data[contig].test.het_tree[sample_i]
-                    
-                    #karyotypes = 0.5*(het_tree[:n_gen/2] - het_tree[:n_gen/2-1:-1])
-                    #self.results_data[contig].karyotype[sample_i] = karyotypes
-                    
-                    #genotype_scores = self.results_data[contig].het_tree_scores[sample_i].reshape(n_gen,1)
-                    genotype_p = self.results_data[contig].het_tree_p[sample_i].reshape(n_gen,1)
-                    
-                    #karyotype_scores = np.abs(genotype_scores[:n_gen/2] - genotype_scores[:n_gen/2-1:-1])
-                    p = [genotype_p[:n_gen/2],genotype_p[:n_gen/2-1:-1]]
-                    karyotype_p = (1-np.min(p,axis=0))*np.max(p, axis=0)
-
-                    #self.results_data[contig].karyotype_scores[sample_i] = karyotype_scores
-                    self.results_data[contig].karyotype_p[sample_i] = karyotype_p
-                    #self.results_data[contig].mean_karyotype[sample_i] = np.sum(karyotype_p*karyotypes,axis=0)/np.sum(karyotype_p)
-                    self.results_data[contig].karyotype[sample_i] = (het_tree[np.argmax(karyotype_p)], het_tree[-(np.argmax(karyotype_p)+1)])
-
     def plot(self):
         """Plot the distribution of ancestral probabilities"""
         sample_names = next(iter(self.test_data.values())).sample_names
@@ -452,12 +512,20 @@ class HyPred(object):
         
         plt.matshow(np.array(self.train_data[contig].X, dtype=np.float), vmax=1, vmin=-1, cmap=cm.seismic)
         plt.yticks(range(len(self.train_data[contig].sample_names)), self.train_data[contig].sample_names, size=4)
-        plt.xticks(range(len(self.train_data[contig].pos)), self.train_data[contig].pos, rotation=90, size=4)
+        plt.xticks(range(len(self.train_data[contig].pos)), self.train_data[contig].pos, rotation=90, size=8)
         plt.title("Training data")
         
-        plt.matshow(np.array(self.test_data[contig].X, dtype=np.float), vmax=1, vmin=-1, cmap=cm.seismic)
+        
+        if self.test_data[contig].het_X is not None:
+
+            
+            arr = np.reshape([mp(x) for x in self.test_data[contig].het_X.flat], self.test_data[contig].het_X.shape)
+            plt.matshow(np.array(arr, dtype=np.float), interpolation='none',cmap=col)
+        
+        else:
+            plt.matshow(np.array(self.test_data[contig].X, dtype=np.float), vmax=1, vmin=-1, cmap=cm.seismic)
         plt.yticks(range(len(self.test_data[contig].sample_names)), self.test_data[contig].sample_names, size=4)
-        plt.xticks(range(len(self.test_data[contig].pos)), self.test_data[contig].pos, rotation=90, size=4)
+        plt.xticks(range(len(self.test_data[contig].pos)), self.test_data[contig].pos, rotation=90, size=8)
         plt.title("Test data")    
         
         print("Contig {0}\n".format(contig))
@@ -468,7 +536,7 @@ class HyPred(object):
                             vmax=abs(self.results_data[contig].classifier.coef_).max(), 
                             vmin=-abs(self.results_data[contig].classifier.coef_).max(), 
                             cmap=cm.seismic)
-        plt.xticks(range(len(self.test_data[contig].pos)), self.test_data[contig].pos, rotation=90, size=4)
+        plt.xticks(range(len(self.test_data[contig].pos)), self.test_data[contig].pos, rotation=90, size=8)
         plt.title("Weight matrix")
     
         
@@ -476,7 +544,9 @@ class HyPred(object):
         print("Sample  \tPrediction\t Pr(B)")
         print("-"*40)
         for s,p, p0 in zip(self.test_data[contig].sample_names, self.results_data[contig].pred, self.results_data[contig].p0  ):
-            print("{0}\t{1}\t{2:.2f}".format(s,p,p0))
+            if type(p0) is list:
+                print("{0}\t{1}\t{2}".format(s,p,p0))
+            else:
+                print("{0}\t{1}\t{2:.2f}".format(s,p,p0))
             
-
 
