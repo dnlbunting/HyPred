@@ -125,7 +125,6 @@ def _pred(p):
     else:
         return 'X'
 
-col = ListedColormap(['white', 'red', 'blue', 'green'], 'indexed')
 
 def mp(x):
     if x == [0]:
@@ -535,13 +534,12 @@ class HyPred(object):
         
         
         if self.test_data[contig].het_X is not None:
-
-            
             arr = np.reshape([mp(x) for x in self.test_data[contig].het_X.flat], self.test_data[contig].het_X.shape)
-            plt.matshow(np.array(arr, dtype=np.float), interpolation='none',cmap=col)
+            plt.matshow(np.array(arr, dtype=np.float),  cmap=ListedColormap(['white', 'red', 'blue', 'green']), vmax=3, vmin=0)
         
         else:
             plt.matshow(np.array(self.test_data[contig].X, dtype=np.float), vmax=1, vmin=-1, cmap=cm.seismic)
+            
         plt.yticks(range(len(self.test_data[contig].sample_names)), self.test_data[contig].sample_names, size=4)
         plt.xticks(range(len(self.test_data[contig].pos)), self.test_data[contig].pos, rotation=90, size=8)
         plt.title("Test data")    
