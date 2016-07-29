@@ -4,12 +4,13 @@ import re
 
 import Bio.SeqIO
 
-markers_1 = pd.read_csv("markers_1.txt")
+markers_1 = pd.read_csv("data/markers_1.txt")
+
 loci = [re.match("(\S+)_(\S+)", x).groups() for x in markers_1['markers']]
 loci = [("PST130_"+x[0], x[1]) for x in loci]
 
 f = open("loci.txt", 'w')
-for x in loci_2:
+for x in loci:
     f.write(x[0]+"\t"+x[1]+"\n")
 f.close()
 
