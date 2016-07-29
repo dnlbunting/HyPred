@@ -509,6 +509,11 @@ class HyPred(object):
         """Summary table of ancestral predictions"""
         sample_names = next(iter(self.test_data.values())).sample_names
         
+        if len(list(self.results_data.keys())) == 0:
+            ## Failed to train any classifiers
+            ns = len(sample_names)
+            return (sample_names, [0]*ns, [0]*ns, [0]*ns, [0]*ns, [0]*ns, [0]*ns)
+            
         A = np.sum(np.logical_or(self.pred_matrix == "popA",self.pred_matrix == "popA/popA"), axis=0)
         B = np.sum(np.logical_or(self.pred_matrix == "popB", self.pred_matrix == "popB/popB"), axis=0)
         C = np.sum(self.pred_matrix == "popA/popB", axis=0)
