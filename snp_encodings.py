@@ -1,7 +1,6 @@
 #!/usr/bin/env python
 
 def encode_het(ref, obs, stats=None):
-    assert len(obs) == 2, "Invalid snp {0}".format(obs)
     if '-9' in obs or obs == float('nan'):
         ## Missing data
         stats['missing']+=1
