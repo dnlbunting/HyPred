@@ -33,10 +33,7 @@ class Data(object):
         if sample_names is not None:
             assert len(sample_names) == X.shape[0], "Dimensions of sample_names must match X"
         
-        
 
- 
- 
 
 ## Data containers
 class TrainData(Data):
@@ -93,37 +90,32 @@ class TestData(Data):
 
 class Result(object):
     """Class for storing the per contig results, weak ref'ed to the input data"""
-    def __init__(self, contig, train=None, test=None, cv=None, classifier=None, p0=None):
+    def __init__(self, contig, train=None, test=None, cv=None, classifier=None, p=None):
         
         self.train = train
         self.test = test
         self.cv = cv
         self.classifier = classifier
-        self.p0 = p0
+        self.p = p
         self.contig=contig
         
     @property
     def pred(self):
-        self.__pred = np.empty_like(self.p0, dtype=np.object)
-        if self.p0 is None:
+        self.__pred = np.empty_like(self.p, dtype=np.object)
+        if self.p is None:
             return None
-            
-        if type(self.p0[0]) is list:
-            self.__pred = [map(_pred, x) for x in self.p0]
         else:
-            self.__pred = map(_pred, self.p0)
-            
+            self.__pred = _pred(self.p)    
         return self.__pred
-   
-   
-   
+
+        
+
 def _pred(p):
-    if p > 0.9:
-        return 'popB'
-    elif p < 0.1:
-        return 'popA'
-    else:
-        return 'X'
+    ret = ['X' for x in range(p.shape[0])]
+    rows, cols = np.where(p>0.9)
+    for lib, pred in zip(rows, cols):
+        ret[lib] = "pop{0}".format(pred+1)
+    return ret
 
 
 def mp(x):
@@ -137,7 +129,7 @@ def mp(x):
         return 3
 
 ## Preprocessing
-def load_data(markersA_file, markersB_file, markersAB_file, ref_file, contig_data_file=None):
+def load_data(train_files, test_file, ref_file, contig_data_file=None):
     """ Loads SNP data for the two training groups (A, B) and the test group (AB),
         loads the reference base and constructs a lookup dictionary.
     
@@ -150,25 +142,25 @@ def load_data(markersA_file, markersB_file, markersAB_file, ref_file, contig_dat
         markersA, markersB, markersAB :  filtered dataframe reads of the csvs
         ref: dictionary mapping locus to reference base
     """
-    
-    markersA = pd.read_csv(markersA_file,   comment='#', skip_blank_lines=True).drop("group", 1).dropna(axis=0)
-    markersB = pd.read_csv(markersB_file,   comment='#', skip_blank_lines=True).drop("group", 1).dropna(axis=0)
-    markersAB = pd.read_csv(markersAB_file, comment='#', skip_blank_lines=True).drop("group", 1).dropna(axis=0)
+    train_markers = [pd.read_csv(file, comment='#',
+                     skip_blank_lines=True).drop("group", 1).dropna(axis=0) for file in train_files]
+                     
+    test_markers = pd.read_csv(test_file, comment='#', skip_blank_lines=True).drop("group", 1).dropna(axis=0)
     
     reference = pd.read_csv(ref_file, comment='#', sep='\t', skip_blank_lines=True)
     ref = { x[0]:str(lett_to_num[x[1]]) for x in reference.to_dict(orient='split')['data']}
     
-    assert np.all(markersA['markers'] == markersB['markers']), "The set of loci must be consistent between the groups A, B, AB"
-    assert np.all(markersA['markers'] == markersAB['markers']), "The set of loci must be consistent between the groups A, B, AB"
+    #assert np.all(markersA['markers'] == markersB['markers']), "The set of loci must be consistent between the groups A, B, AB"
+    #assert np.all(markersA['markers'] == markersAB['markers']), "The set of loci must be consistent between the groups A, B, AB"
     
-    loci = markersA['markers']
+    loci = test_markers['markers']
     
     if contig_data_file is not None:
         contig_data = pd.read_csv(contig_data_file, comment='#', skip_blank_lines=True, index_col=0)
-        return markersA, markersB, markersAB, ref, loci, contig_data
+        return train_markers, test_markers, ref, loci, contig_data
     
     else:
-        return markersA, markersB, markersAB, ref, loci
+        return train_markers, test_markers, ref, loci
 
 def encode(marker_df, ref, enc_function):
     """ Encodes the dataframe of bases at each locus per library under the encoding scheme given in enc_function
@@ -228,7 +220,7 @@ def contig_bunch(marker, loci):
         
     return bunched
 
-def merge_bunched(bunched1, bunched0):
+def merge_bunched(bunched):
     """ Merges data bunched by contig of the two groups, creates X and y members.
         NB transposes X array so it is (n_libraries, n_markers)
         Params:
@@ -242,16 +234,20 @@ def merge_bunched(bunched1, bunched0):
     
     train_data = {}
     
-    for c in bunched0.keys():
-        assert bunched1[c]['pos'] == bunched0[c]['pos']
+    for c in bunched[0].keys():
+        #assert bunched1[c]['pos'] == bunched0[c]['pos']
+        X = np.transpose(np.concatenate([group[c]['data'] for group in bunched], axis=1))
+        y = []
+        for i,group in enumerate(bunched):
+            y += [i]*group[c]['data'].shape[1]
         
-        train_data[c] = TrainData(X = np.transpose(np.concatenate(( bunched1[c]['data'], bunched0[c]['data']), axis=1)),
-                                  y = np.array([1]*bunched1[c]['data'].shape[1] + [0]*bunched0[c]['data'].shape[1]),
-                                  pos = bunched0[c]['pos'],
+        train_data[c] = TrainData(X = X,
+                                  y = np.array(y),
+                                  pos = bunched[0][c]['pos'],
                                   contig = c)
     return train_data
 
-def create_training_data(markersA, markersB, encode_func, loci, ref, contig_data=None):
+def create_training_data(train_markers, encode_func, loci, ref, contig_data=None):
     """Basically a wrapper that combines the data preprocessing stages for the pipeline for the ancestral populations
         markersA = 1
         markersB = 0
@@ -264,11 +260,15 @@ def create_training_data(markersA, markersB, encode_func, loci, ref, contig_data
     Returns:
     training_data: dictionary of training data with keyed by contig: {contig : { 'X':matrix of enc snps, 'y': [1,1,1,...,0,0,0,...], 'pos':[physical pos of snp on contig]}}  
     """
-    data = merge_bunched(contig_bunch(encode(markersA, ref, encode_func), loci), 
-                         contig_bunch(encode(markersB, ref, encode_func), loci))
+    data = merge_bunched([contig_bunch(encode(markers, ref, encode_func), loci) for markers in train_markers])
     
+    sample_names = []
+    for i,group in enumerate(train_markers):
+        sample_names += list(group.columns[1:])
+        
     for key,val in data.items():
-        val.sample_names = list(markersA.columns[1:]) + list(markersB.columns[1:])
+        
+        val.sample_names = sample_names
         if contig_data is not None:
              val.contig_data = contig_data.ix[int(key)].to_dict()
              
@@ -383,8 +383,10 @@ class Imputer(sklearn.preprocessing.Imputer):
         return np.array(X, dtype=np.float)
     
     def impute(self, X, y):
-        return np.vstack((self.fit(X[y==1,:]).transform(X[y==1,:]) , 
-                          self.fit(X[y==0,:]).transform(X[y==0,:])))
+        imputed = [None for i in range(len(sorted(set(y))))]
+        for i in sorted(set(y)):
+            imputed[i] = self.fit(X[y==i,:]).transform(X[y==i,:])
+        return np.vstack(imputed)
 
 
 ## Core pipeline
@@ -403,7 +405,6 @@ class HyPred(object):
             self.classifier = lambda : LogisticRegression(class_weight='balanced', penalty=self.penalty, C=self.C, fit_intercept=False)
     
     def train(self):
-        
         """For each contig in train_data train a classifier and do cv_fold cross validation and select 
             contigs which can be classified with accuracy greater than acc_cutoff. Re-train on these 
             selected contigs with all of the training data and update train_data with the trained classifiers
@@ -443,7 +444,7 @@ class HyPred(object):
         print("Successfully trained %i classifiers" % len(self.selected_contigs))#
         
         return len(self.selected_contigs)
-        
+    
     def predict(self, use_het=True):
         """Predict ancestral population of origin, using test_data and the trained
          classifiers in results data, for the contigs in selected_contigs
@@ -452,7 +453,7 @@ class HyPred(object):
         results_data: dictionary {contig : Result} where the Result object has a classifier member populated by a trained classifier """
         
         self.pred_matrix = []
-        self.p0_matrix = []
+        self.p_matrix = []
         for contig in self.selected_contigs:
             self.results_data[contig].test = self.test_data[contig]
             
@@ -488,46 +489,54 @@ class HyPred(object):
                 
                 del self.test_data[contig].het_tree
             else:
-                self.results_data[contig].p0 = np.array(self.results_data[contig].classifier.predict_proba(self.test_data[contig].X))[:,0]
+                self.results_data[contig].p = np.array(self.results_data[contig].classifier.predict_proba(self.test_data[contig].X))
                 self.pred_matrix.append(self.results_data[contig].pred)
-                self.p0_matrix.append(self.results_data[contig].p0)
+                self.p_matrix.append(self.results_data[contig].p)
             
         self.pred_matrix = np.array(self.pred_matrix)
-        self.p0_matrix = np.array(self.p0_matrix)
-        
+        self.p_matrix = np.array(self.p_matrix)
+    
     def plot(self):
         """Plot the distribution of ancestral probabilities"""
         sample_names = next(iter(self.test_data.values())).sample_names
-        plt.figure()
-        for i in range(self.p0_matrix.shape[1]):
-            plt.hist(self.p0_matrix[:,i], bins=50, histtype='step', label=sample_names[i])
-            plt.xlabel("Pr(Group B)")
+        n_groups = self.p_matrix.shape[2]
+        fig,ax_list = plt.subplots(1,n_groups)
+        for i in range(n_groups):
+            ax = ax_list.flat[i]
+            for j,lib in enumerate(sample_names):
+                ax.hist(self.p_matrix[:,j,i], bins=50, histtype='step', label=sample_names[i])
+            ax.set_xlabel("Pr(Group {0})".format(i+1))
         plt.legend()
-        plt.show()
     
     def summarise(self):
         """Summary table of ancestral predictions"""
         sample_names = next(iter(self.test_data.values())).sample_names
+        n_groups = self.p_matrix.shape[2]
         
         if len(list(self.results_data.keys())) == 0:
             ## Failed to train any classifiers
             ns = len(sample_names)
             return (sample_names, [0]*ns, [0]*ns, [0]*ns, [0]*ns, [0]*ns, [0]*ns)
-            
-        A = np.sum(np.logical_or(self.pred_matrix == "popA",self.pred_matrix == "popA/popA"), axis=0)
-        B = np.sum(np.logical_or(self.pred_matrix == "popB", self.pred_matrix == "popB/popB"), axis=0)
-        C = np.sum(self.pred_matrix == "popA/popB", axis=0)
-        XB = np.sum(self.pred_matrix == "X/popB", axis=0)
-        AX = np.sum(self.pred_matrix == "popA/X", axis=0)
-        X = np.sum(np.logical_or(self.pred_matrix == "X",self.pred_matrix == "X/X"), axis=0)
         
-        ratio = np.array(A, dtype=np.float)/B
+        summary = np.zeros((len(sample_names),n_groups))
+        for lib_idx,lib in enumerate(sample_names):
+            for group_idx in range(n_groups):
+                summary[:,group_idx] = np.sum(self.pred_matrix == 'pop{0}'.format(group_idx+1), axis= 0)
         
-        print("Sample  \tpopA\tpopB\tpopA/popB\t\tno pred\tratio")
+        ratios = (100*summary.T/np.sum(summary, axis=1)).T
+        
+        print("Contig counts p > 0.9")
+        print("Sample  \t" + '\t'.join(['pop{0}'.format(i+1) for i in range(n_groups)]))
         print("-"*60)
         for i in range(len(sample_names)):
-            print("{0}\t{1}\t{2}\t{3}\t{4}\t{5:.2f}".format(sample_names[i], A[i], B[i], C[i], AX[i]+XB[i]+X[i], ratio[i]))
-        return (sample_names, A,B,C,XB,AX,X)
+            print( sample_names[i] + "\t" + '\t'.join(["{"+str(j)+":.0f}" for j in range(n_groups)]).format(*summary[i]) )
+        
+        print("\nContig percentages")
+        print("Sample  \t" + '\t'.join(['pop{0}'.format(i+1) for i in range(n_groups)]))
+        print("-"*60)
+        for i in range(len(sample_names)):
+            print( sample_names[i] + "\t" + '\t'.join(["{"+str(j)+":.1f}" for j in range(n_groups)]).format(*ratios[i]) )
+    
     def examine_contig(self, contig=None):
         if contig is None:
             contig = next(iter(self.results_data.keys()))
@@ -562,12 +571,9 @@ class HyPred(object):
     
         
         
-        print("Sample  \tPrediction\t Pr(B)")
+        print("Sample  \tPrediction\t Pr")
         print("-"*40)
-        for s,p, p0 in zip(self.test_data[contig].sample_names, self.results_data[contig].pred, self.results_data[contig].p0  ):
-            if type(p0) is list:
-                print("{0}\t{1}\t{2}".format(s,p,p0))
-            else:
-                print("{0}\t{1}\t{2:.2f}".format(s,p,p0))
+        for s,p, pr in zip(self.test_data[contig].sample_names, self.results_data[contig].pred, np.max(self.results_data[contig].p, axis=1)  ):
+            print("{0}\t{1}\t{2:.2f}".format(s,p,pr))
             
 
