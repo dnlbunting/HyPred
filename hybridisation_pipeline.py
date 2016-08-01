@@ -7,6 +7,7 @@ from collections import defaultdict
 import sklearn
 from sklearn.linear_model import LogisticRegression
 from  sklearn import cross_validation
+from sklearn.svm import OneClassSVM
 import sklearn.preprocessing 
 import matplotlib
 import matplotlib.cm as cm 
@@ -404,6 +405,16 @@ class HyPred(object):
         if self.classifier is None:
             self.classifier = lambda : LogisticRegression(class_weight='balanced', penalty=self.penalty, C=self.C, fit_intercept=False)
     
+    def outlier_detection(self, nu):
+        inliers, outliers = 0,0
+        for contig in self.train_data.keys():
+            svm = OneClassSVM(kernel='sigmoid', nu=nu)
+            svm.fit(self.train_data[contig].X)
+            p = svm.predict(self.test_data[contig].X)
+            inliers+=np.sum(p==1)
+            outliers+=np.sum(p==-1)
+        return inliers, outliers
+            
     def train(self):
         """For each contig in train_data train a classifier and do cv_fold cross validation and select 
             contigs which can be classified with accuracy greater than acc_cutoff. Re-train on these 
@@ -431,7 +442,7 @@ class HyPred(object):
                                                   X=self.train_data[contig].X, 
                                                   y=self.train_data[contig].y, 
                                                   cv=cross_validation.StratifiedKFold(self.train_data[contig].y, self.cv_folds, shuffle=True))
-                                                  
+            self.train_data[contig].cv = cv
             ## Require self.CV accuracy of >self.acc_cutoff to use to evaluate hybridisation 
             if np.mean(cv) > self.acc_cutoff:
                 self.selected_contigs.append(contig)
