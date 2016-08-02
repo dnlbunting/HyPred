@@ -15,7 +15,7 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import numpy.ma as ma
 from matplotlib.colors import ListedColormap
-
+from sklearn.utils.extmath import softmax
 
 lett_to_num = {'A':1,'T':2, 'G':3, "C":4}
 num_to_lett = {1:'A',2:'T', 3:'G', 4:"C", -9:"X"}
@@ -34,7 +34,8 @@ class Data(object):
         if sample_names is not None:
             assert len(sample_names) == X.shape[0], "Dimensions of sample_names must match X"
         
-
+def sigmoid(x):                                        
+    return 1 / (1 + np.exp(-x))
 
 ## Data containers
 class TrainData(Data):
@@ -42,7 +43,46 @@ class TrainData(Data):
     def __init__(self, X, y, pos, contig, sample_names=None):
         super(TrainData, self).__init__(X, pos, contig, sample_names)
         self.y = y
-
+        self._X_collapsed = None
+        self._collapse_key = None
+        
+    def collapse_identical(self):
+        self._X_collapsed = np.empty((self.X.shape[0],0))
+        self._collapse_key = []
+        for i in range(self.X.shape[1]):
+            col = np.atleast_2d(self.X[:,i]).T
+            if np.any(np.all(self._X_collapsed == col, axis=0)):
+                #Already seen this column
+                continue
+            else:
+                self._X_collapsed = np.hstack( (self._X_collapsed, col) )
+                self._collapse_key.append(np.where(np.all(self.X == col, axis=0))[0])
+                
+    def uncollapase(self, w):
+        uncol = np.empty((w.shape[0], self.X.shape[1]))
+        for i,_ in enumerate(self.collapse_key):
+            for j in self.collapse_key[i]:
+                uncol[:,j] = w[:,i]
+        return uncol
+        
+    def collapse(self, w):
+        col = np.empty((w.shape[0], self.X_collapsed.shape[1]))
+        for i,_ in enumerate(self.collapse_key):
+            col[:,i] = w[:,self.collapse_key[i][0]]
+        return col
+        
+    @property
+    def X_collapsed(self):
+        if self._X_collapsed is None:
+            self.collapse_identical()
+        return self._X_collapsed
+        
+    @property
+    def collapse_key(self):
+        if self._collapse_key is None:
+            self.collapse_identical()
+        return self._collapse_key
+        
     def __deepcopy__(self, memo):
         cls = self.__class__
         result = cls.__new__(cls)
@@ -108,7 +148,11 @@ class Result(object):
             self.__pred = _pred(self.p)    
         return self.__pred
 
-
+    def predict_proba(self, X=None):
+        if X is None:
+            X = self.test.X
+        w = self.train.uncollapase(self.classifier.coef_)
+        return softmax(np.dot(X, w.T  ))
 
 def _pred(p):
     ret = ['X' for x in range(p.shape[0])]
@@ -180,7 +224,7 @@ def encode(marker_df, ref, enc_function, do_stats=True):
     
     if do_stats:
         encoded = enc_function(data, ref_list, stats)
-        
+        print encoded
         
         print("-"*60)
         for k,v in stats.items():
@@ -394,7 +438,7 @@ class Imputer(sklearn.preprocessing.Imputer):
 ## Core pipeline
 class HyPred(object):
     """docstring for HyPred"""
-    def __init__(self, train_data=None, test_data=None, C=1.0, penalty='l1', acc_cutoff=0.95, cv_folds=10, classifier=None):
+    def __init__(self, train_data=None, test_data=None, C=1.0, penalty='l1', acc_cutoff=0.95, cv_folds=10, classifier=None, lr_args = {}):
         self.train_data = train_data
         self.test_data = test_data
         self.C = C
@@ -402,9 +446,12 @@ class HyPred(object):
         self.cv_folds = cv_folds
         self.classifier = classifier
         self.penalty = penalty
-        print "oad"
+        
+        self.n_contigs = len(list(self.train_data.keys()))
+        self.n_groups = len(set(self.train_data.values()[0].y))
+        
         if self.classifier is None:
-            self.classifier = lambda : LogisticRegression(class_weight='balanced', penalty=self.penalty, C=self.C, fit_intercept=False)
+            self.classifier = lambda : LogisticRegression(class_weight='balanced', penalty=self.penalty, C=self.C, fit_intercept=False,**lr_args)
     
     def outlier_detection(self, nu):
         inliers, outliers = 0,0
@@ -438,9 +485,8 @@ class HyPred(object):
         self.selected_contigs = []
         
         for contig in self.train_data.keys():    
-    
             cv = cross_validation.cross_val_score(self.classifier(), 
-                                                  X=self.train_data[contig].X, 
+                                                  X=self.train_data[contig].X_collapsed, 
                                                   y=self.train_data[contig].y, 
                                                   cv=cross_validation.StratifiedKFold(self.train_data[contig].y, self.cv_folds, shuffle=True))
             self.train_data[contig].cv = cv
@@ -451,7 +497,7 @@ class HyPred(object):
                                                   cv=cv,
                                                   contig=contig,   
                                                   classifier = self.classifier())
-                self.results_data[contig].classifier.fit(X=self.train_data[contig].X, y=self.train_data[contig].y)
+                self.results_data[contig].classifier.fit(X=self.train_data[contig].X_collapsed, y=self.train_data[contig].y)
                 
         print("Successfully trained %i classifiers" % len(self.selected_contigs))
         
@@ -466,6 +512,7 @@ class HyPred(object):
         
         self.pred_matrix = []
         self.p_matrix = []
+        
         for contig in self.selected_contigs:
             self.results_data[contig].test = self.test_data[contig]
             
@@ -476,15 +523,17 @@ class HyPred(object):
                     print "Failed growing genotype tree for contig {0}".format(contig)
                     continue
                     
-                self.results_data[contig].het_tree_p = np.array([self.results_data[contig].classifier.predict_proba(x)[:,0] 
+                self.results_data[contig].het_tree_p = np.array([self.results_data[contig].classifier.predict_proba(x) 
                                                                       for x in self.test_data[contig].het_tree])
                 self.results_data[contig].karyotype = []
-                self.results_data[contig].p0 = []
+                self.results_data[contig].karyotype_p = []
                 
                 for sample_i in range(self.results_data[contig].test.n_samples):
                     n_gen = self.results_data[contig].test.het_tree[sample_i].shape[0]
                     het_tree = self.results_data[contig].test.het_tree[sample_i]
+                    
                     genotype_p = self.results_data[contig].het_tree_p[sample_i].reshape(n_gen)
+                    
                     if n_gen > 1:
                         p = [genotype_p[:n_gen/2],genotype_p[:n_gen/2-1:-1]]
                         karyotype_p = (1-np.min(p,axis=0))*np.max(p, axis=0)
@@ -501,7 +550,7 @@ class HyPred(object):
                 
                 del self.test_data[contig].het_tree
             else:
-                self.results_data[contig].p = np.array(self.results_data[contig].classifier.predict_proba(self.test_data[contig].X))
+                self.results_data[contig].p = np.array(self.results_data[contig].predict_proba())
                 self.pred_matrix.append(self.results_data[contig].pred)
                 self.p_matrix.append(self.results_data[contig].p)
             
@@ -574,7 +623,7 @@ class HyPred(object):
         
         print("\nCV Accuracy: {0:.2f}".format(np.mean(self.results_data[contig].cv)))
         
-        plt.matshow(np.array(self.results_data[contig].classifier.coef_, dtype=np.float), 
+        plt.matshow(np.array(self.train_data[contig].uncollapase(self.results_data[contig].classifier.coef_), dtype=np.float), 
                             vmax=abs(self.results_data[contig].classifier.coef_).max(), 
                             vmin=-abs(self.results_data[contig].classifier.coef_).max(), 
                             cmap=cm.seismic)
