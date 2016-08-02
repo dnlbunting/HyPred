@@ -57,7 +57,7 @@ class TrainData(Data):
         setattr(result, 'X', np.copy(self.X))
         setattr(result, 'y', np.copy(self.y))
         return result
-    
+
 class TestData(Data):
     """Class for storing per contig test data"""
     def __init__(self, X, pos, contig, truth=None, sample_names=None, het_X=None):
@@ -87,7 +87,6 @@ class TestData(Data):
                     self.het_tree[sample_i][:, locus_i] = np.where(np.floor(i/2**het_sites) % 2, 
                                                                    self.het_X[sample_i, locus_i][0], 
                                                                    self.het_X[sample_i, locus_i][1])
-                        
 
 class Result(object):
     """Class for storing the per contig results, weak ref'ed to the input data"""
@@ -109,7 +108,7 @@ class Result(object):
             self.__pred = _pred(self.p)    
         return self.__pred
 
-        
+
 
 def _pred(p):
     ret = ['X' for x in range(p.shape[0])]
@@ -163,7 +162,7 @@ def load_data(train_files, test_file, ref_file, contig_data_file=None):
     else:
         return train_markers, test_markers, ref, loci
 
-def encode(marker_df, ref, enc_function):
+def encode(marker_df, ref, enc_function, do_stats=True):
     """ Encodes the dataframe of bases at each locus per library under the encoding scheme given in enc_function
     
         Params:
@@ -175,28 +174,30 @@ def encode(marker_df, ref, enc_function):
         encoded: np array with shape = (n_loci, n_libraries)
     """
     
-    encoded = np.empty((marker_df.shape[0], marker_df.shape[1]-1), dtype=np.object)
     stats = {'Homokaryotic reference':0, 'Heterokaryotic reference/variant':0, 'Homokaryotic variant':0, 'Heterokaryotic variant':0, 'missing':0}
+    ref_list = np.atleast_2d([ref[x] for x in marker_df['markers']]).T
+    data = np.array(marker_df[marker_df.columns[1:]])
     
-    for i,line in enumerate(marker_df.iterrows()):
-        data = np.array(line[1][1:])
-        row = [enc_function(ref[line[1][0]], str(x), stats) for x in data]
-        encoded[i] = row
-    
-    print("-"*60)
+    if do_stats:
+        encoded = enc_function(data, ref_list, stats)
         
-    for k,v in stats.items():
-        print("{0}: {1}".format(k,v))
         
-    cov = float(stats['Homokaryotic reference'] + stats['Heterokaryotic reference/variant'] + stats['Homokaryotic variant'] + stats['Heterokaryotic variant'])
-    
-    print("\nHomo: {0:.2f}%  Hetero: {1:.2f}%".format(100*(stats['Homokaryotic reference']+stats['Homokaryotic variant'])/cov, 
-                                                    100*(stats['Heterokaryotic reference/variant']+stats['Heterokaryotic variant']) /cov ) )
-                                                    
-    print("Covered: {0:.2f}%  Missing: {1:.2f}%".format(100*cov/(stats['missing']+cov),
-                                                       100*stats['missing']/(stats['missing']+cov) )) 
-                                                       
-    print("-"*60)
+        print("-"*60)
+        for k,v in stats.items():
+            print("{0}: {1}".format(k,v))
+            
+        cov = float(stats['Homokaryotic reference'] + stats['Heterokaryotic reference/variant'] + stats['Homokaryotic variant'] + stats['Heterokaryotic variant'])
+        
+        print("\nHomo: {0:.2f}%  Hetero: {1:.2f}%".format(100*(stats['Homokaryotic reference']+stats['Homokaryotic variant'])/cov, 
+                                                        100*(stats['Heterokaryotic reference/variant']+stats['Heterokaryotic variant']) /cov ) )
+                                                        
+        print("Covered: {0:.2f}%  Missing: {1:.2f}%".format(100*cov/(stats['missing']+cov),
+                                                           100*stats['missing']/(stats['missing']+cov) )) 
+                                                           
+        print("-"*60)
+    else:
+        encoded = enc_function(data, ref_list)
+        
     return encoded
 
 def contig_bunch(marker, loci):
@@ -310,7 +311,7 @@ def create_test_data_heterokaryotic(markersAB, hom_encode_func, het_encode_func,
     test_data: dictionary of training data with keyed by contig: {contig : { 'X':matrix of enc snps, 'pos':[physical pos of snp on contig]}}  """
     
     hom_bunched = contig_bunch(encode(markersAB, ref, hom_encode_func), loci)
-    het_bunched = contig_bunch(encode(markersAB, ref, het_encode_func), loci)
+    het_bunched = contig_bunch(encode(markersAB, ref, het_encode_func,do_stats=False), loci)
     
     test_data = {}
     for c in hom_bunched.keys():
@@ -401,7 +402,7 @@ class HyPred(object):
         self.cv_folds = cv_folds
         self.classifier = classifier
         self.penalty = penalty
-        
+        print "oad"
         if self.classifier is None:
             self.classifier = lambda : LogisticRegression(class_weight='balanced', penalty=self.penalty, C=self.C, fit_intercept=False)
     
@@ -452,7 +453,7 @@ class HyPred(object):
                                                   classifier = self.classifier())
                 self.results_data[contig].classifier.fit(X=self.train_data[contig].X, y=self.train_data[contig].y)
                 
-        print("Successfully trained %i classifiers" % len(self.selected_contigs))#
+        print("Successfully trained %i classifiers" % len(self.selected_contigs))
         
         return len(self.selected_contigs)
     
