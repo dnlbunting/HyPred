@@ -14,22 +14,40 @@ import matplotlib.cm as cm
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import numpy.ma as ma
-from matplotlib.colors import ListedColormap
+from matplotlib.colors import ListedColormap,LinearSegmentedColormap
 from sklearn.utils.extmath import softmax
+import progress
 
 lett_to_num = {'A':1,'T':2, 'G':3, "C":4}
 num_to_lett = {1:'A',2:'T', 3:'G', 4:"C", -9:"X"}
 
+hetcmap = LinearSegmentedColormap('hetcmap', {'red':   ((0, 0, 0),
+                                                       (1./3, 1, 1),
+                                                       (2./3, 1, 1),
+                                                       (1, 0, 0)),
+                                    
+                                             'green': ((0, 0, 0),
+                                                       (1./3, 1, 1),
+                                                       (2./3, 0, 1),
+                                                       (1, 0.5, 0.5)),
+                                    
+                                             'blue':  ((0, 1, 1),
+                                                       (1./3, 1, 1),
+                                                       (2./3, 0, 1),
+                                                       (1, 0, 0))} )
+                                                       
 class Data(object):
     """docstring for Data"""
     def __init__(self, X, pos, contig, sample_names=None):
         super(Data, self).__init__()
         self.X = X
         self.pos = pos
+        self.n_loci = len(pos)
         self.contig = contig
         self.sample_names = sample_names
-        self.n_samples, self.n_loci = X.shape
+        self.n_samples,_ = X.shape
         self.het_X = None
+        self.plot_X = None
         
         if sample_names is not None:
             assert len(sample_names) == X.shape[0], "Dimensions of sample_names must match X"
@@ -45,7 +63,39 @@ class TrainData(Data):
         self.y = y
         self._X_collapsed = None
         self._collapse_key = None
+        self._collapse_frac = None
+
+    def plot(self, plot_2bit=False):
         
+        if "/" in self.pos[0] and plot_2bit is False:
+            ## 2 bit encoding
+            self.plot_X = np.empty((self.X.shape[0], self.X.shape[1]/2))
+            for i in range(self.X.shape[0]):
+                for j in range(self.X.shape[1]/2):
+                    a = self.X[i,2*j]
+                    b = self.X[i,2*j+1]
+
+                    if a*b >= 0:
+                        self.plot_X[i,j] = np.mean([a,b])
+                    else:
+                        self.plot_X[i,j] = np.mean([np.abs(a), np.abs(b)]) + 1
+                        
+            plt.matshow(self.plot_X,  cmap=hetcmap, vmax=2, vmin=-1)
+            plt.xticks(range(len(self.pos)/2), [self.pos[2*i] for i in range(len(self.pos)/2)], rotation=90, size=8)
+            
+            
+        else:
+            ## Simple encoding where each coloumn of the X matrix corresponds to a single locusX
+            plt.matshow(np.array(self.X, dtype=np.float), vmax=1, vmin=-1, cmap=cm.seismic)
+            plt.xticks(range(len(self.pos)), self.pos, rotation=90, size=8)
+            
+        plt.yticks(range(len(self.sample_names)), self.sample_names, size=4)
+        plt.title("Training data")
+
+      
+
+                                    
+
     def collapse_identical(self):
         self._X_collapsed = np.empty((self.X.shape[0],0))
         self._collapse_key = []
@@ -113,7 +163,20 @@ class TestData(Data):
         
         #if self.het_X is not None:
         #    self.growHetTree()
+    
+    def plot(self):
+        
+        if self.het_X is not None:
+            arr = np.reshape([mp(x) for x in self.het_X.flat], self.het_X.shape)
+            plt.matshow(np.array(arr, dtype=np.float),  cmap=ListedColormap(['white', 'red', 'blue', 'green']), vmax=3, vmin=0)
+        
+        else:
+            plt.matshow(np.array(self.X, dtype=np.float), vmax=1, vmin=-1, cmap=cm.seismic)
             
+        plt.yticks(range(len(self.sample_names)), self.sample_names, size=4)
+        plt.xticks(range(len(self.pos)), self.pos, rotation=90, size=8)
+        plt.title("Test data")
+    
     def growHetTree(self):
         """Unpacks the compressed representation of heterokaryotic data to a full tree of possible configurations"""
         self.het_tree = [None for i in range(len(self.sample_names))]
@@ -230,7 +293,6 @@ def encode(marker_df, ref, enc_function, do_stats=True):
     
     if do_stats:
         encoded = enc_function(data, ref_list, stats)
-        print encoded
         
         print("-"*60)
         for k,v in stats.items():
@@ -247,7 +309,6 @@ def encode(marker_df, ref, enc_function, do_stats=True):
         print("-"*60)
     else:
         encoded = enc_function(data, ref_list)
-        
     return encoded
 
 def contig_bunch(marker, loci):
@@ -261,6 +322,8 @@ def contig_bunch(marker, loci):
         bunched: dictionary {contig : {'pos':[positions of markers on contig], 'data':array shape (n_pos, n_libraries)}}
     """
     n_loci = len(loci)
+    assert n_loci == marker.shape[0], "Loci list does not match marker array shape"
+    
     bunched = defaultdict(lambda : {'pos':[], 'data':[]})
     for i in range(n_loci):
         contig,pos = loci[i].split('_')

@@ -51,6 +51,45 @@ def _discard_het(obs, ref, stats=None):
         return 0
 discard_het = np.vectorize(_discard_het, excluded = ('stats'),otypes=[np.float])
 
+def enc2bit(obs_arr, ref_arr, stats=None):
+    encoded = np.empty((obs_arr.shape[0]*2, obs_arr.shape[1]))
+    print obs_arr.shape
+    for loci_idx, ref in enumerate(ref_arr.flat):
+        for sample_idx, obs in enumerate(obs_arr[loci_idx,:].flat):
+            
+            if '-9' in obs or obs == float('nan'):
+                ## Missing data
+                encoded[2*loci_idx, sample_idx] = 0
+                encoded[2*loci_idx+1, sample_idx] = 0
+                stats['missing']+=1
+                
+            elif obs == ref*2:
+                ## Homokaryotic match for refetrecne 
+                encoded[2*loci_idx, sample_idx] = -1
+                encoded[2*loci_idx+1, sample_idx] = -1
+                stats['Homokaryotic reference']+=1
+                
+            elif ref in obs:
+                ## Heterokaryotic, one is match for reference
+                encoded[2*loci_idx, sample_idx] = -1
+                encoded[2*loci_idx+1, sample_idx] = +1
+                stats['Heterokaryotic reference/variant']+=1
+                
+            elif obs[0] == obs[1]:
+                ## Homokaryotic, different from reference
+                encoded[2*loci_idx, sample_idx] = +1
+                encoded[2*loci_idx+1, sample_idx] = +1
+                stats['Homokaryotic variant']+=1
+                
+            else:
+                ## Heterokaryotic, neither match reference
+                encoded[2*loci_idx, sample_idx] = +1
+                encoded[2*loci_idx+1, sample_idx] = +1
+                stats['Heterokaryotic variant']+=1
+                
+    return encoded
+                
+            
 def half_count(ref, obs):
     
     if obs == ref*2:
