@@ -571,69 +571,85 @@ class HyPred(object):
         for i in range(n_groups):
             ax = ax_list.flat[i]
             for j,lib in enumerate(sample_names):
-                ax.hist(self.p_matrix[:,j,i], bins=50, histtype='step', label=sample_names[i])
+                ax.hist(self.p_matrix[:,j,i], bins=50, histtype='step', label=sample_names[j])
             ax.set_xlabel("Pr(Group {0})".format(i+1))
         plt.legend()
     
     def summarise(self):
         """Summary table of ancestral predictions"""
         sample_names = next(iter(self.test_data.values())).sample_names
-        n_groups = self.p_matrix.shape[2]
+        summary = np.zeros((len(sample_names),self.n_groups))
         
         if len(list(self.results_data.keys())) == 0:
-            ## Failed to train any classifiers
-            ns = len(sample_names)
-            return (sample_names, [0]*ns, [0]*ns, [0]*ns, [0]*ns, [0]*ns, [0]*ns)
-        
-        summary = np.zeros((len(sample_names),n_groups))
+            return summary
+            
         for lib_idx,lib in enumerate(sample_names):
-            for group_idx in range(n_groups):
+            for group_idx in range(self.n_groups):
                 summary[:,group_idx] = np.sum(self.pred_matrix == 'pop{0}'.format(group_idx+1), axis= 0)
         
         ratios = (100*summary.T/np.sum(summary, axis=1)).T
         
         print("Contig counts p > 0.9")
-        print("Sample  \t" + '\t'.join(['pop{0}'.format(i+1) for i in range(n_groups)]))
+        print("Sample  \t" + '\t'.join(['pop{0}'.format(i+1) for i in range(self.n_groups)]))
         print("-"*60)
         for i in range(len(sample_names)):
-            print( sample_names[i] + "\t" + '\t'.join(["{"+str(j)+":.0f}" for j in range(n_groups)]).format(*summary[i]) )
+            print( sample_names[i] + "\t" + '\t'.join(["{"+str(j)+":.0f}" for j in range(self.n_groups)]).format(*summary[i]) )
         
         print("\nContig percentages")
-        print("Sample  \t" + '\t'.join(['pop{0}'.format(i+1) for i in range(n_groups)]))
+        print("Sample  \t" + '\t'.join(['pop{0}'.format(i+1) for i in range(self.n_groups)]))
         print("-"*60)
         for i in range(len(sample_names)):
-            print( sample_names[i] + "\t" + '\t'.join(["{"+str(j)+":.1f}" for j in range(n_groups)]).format(*ratios[i]) )
+            print( sample_names[i] + "\t" + '\t'.join(["{"+str(j)+":.1f}" for j in range(self.n_groups)]).format(*ratios[i]) )
+            
+        return summary
     
-    def examine_contig(self, contig=None):
+    def examine_contig(self, contig=None, plot_2bit=False):
         if contig is None:
             contig = next(iter(self.results_data.keys()))
         
-        plt.matshow(np.array(self.train_data[contig].X, dtype=np.float), vmax=1, vmin=-1, cmap=cm.seismic)
-        plt.yticks(range(len(self.train_data[contig].sample_names)), self.train_data[contig].sample_names, size=4)
-        plt.xticks(range(len(self.train_data[contig].pos)), self.train_data[contig].pos, rotation=90, size=8)
-        plt.title("Training data")
-        
-        
-        if self.test_data[contig].het_X is not None:
-            arr = np.reshape([mp(x) for x in self.test_data[contig].het_X.flat], self.test_data[contig].het_X.shape)
-            plt.matshow(np.array(arr, dtype=np.float),  cmap=ListedColormap(['white', 'red', 'blue', 'green']), vmax=3, vmin=0)
-        
-        else:
-            plt.matshow(np.array(self.test_data[contig].X, dtype=np.float), vmax=1, vmin=-1, cmap=cm.seismic)
-            
-        plt.yticks(range(len(self.test_data[contig].sample_names)), self.test_data[contig].sample_names, size=4)
-        plt.xticks(range(len(self.test_data[contig].pos)), self.test_data[contig].pos, rotation=90, size=8)
-        plt.title("Test data")    
+        self.train_data[contig].plot(plot_2bit=plot_2bit)
+        self.test_data[contig].plot()
+    
         
         print("Contig {0}\n".format(contig))
         
         print("\nCV Accuracy: {0:.2f}".format(np.mean(self.results_data[contig].cv)))
+        w = self.train_data[contig].uncollapase(self.results_data[contig].classifier.coef_)
         
-        plt.matshow(np.array(self.train_data[contig].uncollapase(self.results_data[contig].classifier.coef_), dtype=np.float), 
-                            vmax=abs(self.results_data[contig].classifier.coef_).max(), 
-                            vmin=-abs(self.results_data[contig].classifier.coef_).max(), 
-                            cmap=cm.seismic)
-        plt.xticks(range(len(self.test_data[contig].pos)), self.test_data[contig].pos, rotation=90, size=8)
+        if "/" in self.train_data[contig].pos[0] and plot_2bit is False:
+            w_het = np.empty((w.shape[0], w.shape[1]/2))
+
+            for i in range(w.shape[0]):
+                for j in range(w_het.shape[1]):
+                    a = w[i,2*j]/np.max(w)
+                    b = w[i,2*j+1]/np.max(w)
+            
+                    if a*b > 0 or b < 1e-5:
+                        ## Site is homokaryotic if:
+                        ## - both bits have the same sign
+                        ## - the second bit is reference-like
+                        ## - the second bit is 0
+                        if a != 0:
+                            w_het[i,j] = np.sign(a)*np.max([np.abs(a), np.abs(b)])
+                        else:
+                            w_het[i,j] = np.sign(b)*np.max([np.abs(a), np.abs(b)])\
+                    
+                    elif a*b < 0 or np.abs(a) < 1e-5:
+                        w_het[i,j] = np.max([np.abs(a), np.abs(b)]) + 1.1
+                    else:
+                        print "WHAT THE FUCK"
+                        
+            print w_het
+                        
+            plt.matshow(w_het,  cmap=hetcmap, vmax=2.01, vmin=-1.)
+            plt.xticks(range(len(self.train_data[contig].pos)/2), [self.train_data[contig].pos[2*i] for i in range(len(self.train_data[contig].pos)/2)], rotation=90, size=8)
+        
+        else:
+            plt.matshow(np.array(w, dtype=np.float), 
+                                vmax=abs(self.results_data[contig].classifier.coef_).max(), 
+                                vmin=-abs(self.results_data[contig].classifier.coef_).max(), 
+                                cmap=cm.seismic)
+            plt.xticks(range(len(self.test_data[contig].pos)), self.test_data[contig].pos, rotation=90, size=8)
         plt.title("Weight matrix")
     
         
