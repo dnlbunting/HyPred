@@ -70,6 +70,12 @@ class TrainData(Data):
         for i,_ in enumerate(self.collapse_key):
             col[:,i] = w[:,self.collapse_key[i][0]]
         return col
+    
+    @property
+    def collapse_frac(self):
+        if self._collapse_frac is None:
+            self._collapse_frac = (self.X.shape[1] - self.X_collapsed.shape[1])/float(self.X.shape[1])
+        return self._collapse_frac
         
     @property
     def X_collapsed(self):
