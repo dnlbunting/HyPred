@@ -507,7 +507,7 @@ class Imputer(sklearn.preprocessing.Imputer):
 ## Core pipeline
 class HyPred(object):
     """docstring for HyPred"""
-    def __init__(self, train_data=None, test_data=None, C=1.0, penalty='l1', acc_cutoff=0.95, cv_folds=10, classifier=None, lr_args = {}):
+    def __init__(self, train_data=None, test_data=None, C=1.0, penalty='l1', acc_cutoff=0.95, cv_folds=7, classifier=None, lr_args = {}):
         self.train_data = train_data
         self.test_data = test_data
         self.C = C
@@ -553,19 +553,21 @@ class HyPred(object):
         self.results_data = {}
         self.selected_contigs = []
         
-        for contig in self.train_data.keys():    
-            cv = cross_validation.cross_val_score(self.classifier(), 
+        for i, contig in enumerate(self.train_data.keys()):    
+            cv = cross_validation.cross_val_score(self.classifier(75), 
                                                   X=self.train_data[contig].X_collapsed, 
                                                   y=self.train_data[contig].y, 
                                                   cv=cross_validation.StratifiedKFold(self.train_data[contig].y, self.cv_folds, shuffle=True))
             self.train_data[contig].cv = cv
-            ## Require self.CV accuracy of >self.acc_cutoff to use to evaluate hybridisation 
+            ## Require self.CV accuracy of >self.acc_cutoff to use to evaluate hybridisation
+            progress.update(i/float(self.n_contigs)) 
+            
             if np.mean(cv) > self.acc_cutoff:
                 self.selected_contigs.append(contig)
                 self.results_data[contig] = Result(train=self.train_data[contig],
                                                   cv=cv,
                                                   contig=contig,   
-                                                  classifier = self.classifier())
+                                                  classifier = self.classifier(300))
                 self.results_data[contig].classifier.fit(X=self.train_data[contig].X_collapsed, y=self.train_data[contig].y)
                 
         print("Successfully trained %i classifiers" % len(self.selected_contigs))
